@@ -1,0 +1,10 @@
+DESCRIPCION,Categoria,Marca,OEM,Fabricante,Ubicacion,Compatibilidad,Precio Venta,Precio Compra,Unidad,Stock
+Polo Manga Corta Blanco,Polos,Nike,NK-001,Nike Peru,Estante A1,Talla S/M/L/XL,35.00,18.00,NIU,50
+Polo Manga Corta Negro,Polos,Nike,NK-002,Nike Peru,Estante A1,Talla S/M/L/XL,35.00,18.00,NIU,45
+Pantalon Jean Slim Azul,Pantalones,Levis,LV-101,Levis Importaciones,Estante B2,Talla 28/30/32/34,120.00,65.00,NIU,20
+Pantalon Jean Negro,Pantalones,Levis,LV-102,Levis Importaciones,Estante B2,Talla 28/30/32/34,120.00,65.00,NIU,15
+Zapatilla Running Blanca,Zapatillas,Adidas,AD-201,Adidas SAC,Estante C3,Talla 38-44,250.00,140.00,NIU,30
+Casaca Deportiva Azul,Casacas,Puma,PM-301,Puma Peru,Estante D4,S/M/L/XL/XXL,180.00,90.00,NIU,25
+Polo Basico Gris,Polos,Sin Marca,,,Estante A2,Talla Unica,25.00,12.00,NIU,100
+Vestido Casual Floral,Vestidos,Zara,ZR-401,Zara Importado,Estante E5,Talla S/M/L,95.00,50.00,NIU,12
+

@@ -1,0 +1,82 @@
+##############################################
+#  Laravel / PHP
+##############################################
+*.log
+.DS_Store
+.env
+.env.backup
+.env.production
+.env.*.local
+.phpactor.json
+.phpunit.result.cache
+
+##############################################
+#  IDE / Editores
+##############################################
+/.fleet
+/.idea
+/.nova
+/.vscode
+/.zed
+/.phpunit.cache
+
+##############################################
+#  Dependencias (se instalan con composer/npm)
+##############################################
+/vendor
+/node_modules
+
+##############################################
+#  Build assets (se generan con npm run build)
+##############################################
+/public/build
+/public/hot
+
+##############################################
+#  Storage público (se regenera con artisan)
+##############################################
+/public/storage
+
+##############################################
+#  Storage interno (logs, caché, sesiones)
+##############################################
+/storage/*.key
+/storage/pail
+/storage/logs/*
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+!/storage/framework/cache/.gitkeep
+!/storage/framework/sessions/.gitkeep
+!/storage/framework/views/.gitkeep
+!/storage/logs/.gitkeep
+
+##############################################
+#  SUNAT - Certificados y documentos fiscales
+#  ⚠️ Esto es CRÍTICO — nunca subir al repo
+##############################################
+/storage/app/sunat/certs/
+/storage/app/sunat/certs/*
+!/storage/app/sunat/certs/.gitkeep
+/storage/app/sunat/xmls/
+/storage/app/sunat/cdrs/
+
+##############################################
+#  Base de datos SQLite local
+##############################################
+/database/database.sqlite
+
+##############################################
+#  Certificados, llaves y volcados SQL
+##############################################
+/auth.json
+Homestead.json
+Homestead.yaml
+Thumbs.db
+*.pfx
+*.pem
+*.p12
+*.key
+*.sql
+/database/deploy_multisucursal.sql
+/database/*.sql
