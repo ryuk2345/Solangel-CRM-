@@ -1,7 +1,7 @@
 # PLAN_MODA — Rwarehouse Moda
 
 Plan para convertir la base heredada de Mangui (repuestos) en un sistema para una tienda de ropa minorista y mayorista.
-Estado: **propuesta, pendiente de aprobación.** No se ha cambiado código.
+Estado: **aprobado con las decisiones del cliente (§8).** La implementación avanza por etapas, cada una en su propia rama.
 
 ---
 
@@ -114,7 +114,7 @@ Se crea un `RolesSeeder` con los roles `administrador`, `vendedor`, `almacenero`
 | Punto de venta / ventas | Todo | Crear, ver las de su tienda | — | Ver |
 | Anular / nota de crédito | Sí | — | — | Ver |
 | Autorizar precio mayorista (1 prenda) | **Sí (único)** | — | — | — |
-| Editar precio en la venta | Pregunta 2 | No | — | — |
+| Editar precio en la venta | Sí | No | — | — |
 | Caja | Todas las de su tienda | Solo la suya | — | Ver |
 | Cotizaciones | Todo | Crear, ver | — | Ver |
 | Clientes | Todo | Crear, ver, editar | — | Ver |
@@ -129,7 +129,7 @@ Se crea un `RolesSeeder` con los roles `administrador`, `vendedor`, `almacenero`
 | Usuarios, tiendas, almacenes, series, empresa | Todo | — | — | — |
 | Ver costos | Sí | No | Sí | Sí |
 
-Cada usuario queda limitado a su tienda (`branch_id`), como hoy. **Pregunta 1:** ¿el administrador ve todas las tiendas o solo la suya?
+Vendedor, almacenero y contador quedan limitados a su tienda (`branch_id`). El administrador ve todas (decisión 1).
 
 ---
 
@@ -167,7 +167,9 @@ Cada etapa va en su propia rama (`feat/...`), con un commit por cambio. Al final
 
 **Etapa 7 — Punto de venta.** Búsqueda por código de barras o SKU (al escanear, agrega la variante exacta), selector de color y talla con stock, indicador "Minorista / Mayorista", y descripción para SUNAT con el formato `Modelo – Color – Talla` (`SunatService.php:216` ya usa `product_name`; solo cambia cómo se arma).
 
-**Etapa 8 — Cambios de talla o color.** Según la respuesta a la pregunta 7.
+**Etapa 8 — Cambios de talla o color.** Nota de crédito parcial + nueva boleta (decisión 7).
+
+**Etapa 8b — Ventas a crédito para mayoristas.** Ver §8.
 
 **Etapa 9 — Reportes.** Ventas por talla, color, temporada y canal; precios mayoristas autorizados; stock bajo; curva rota; stock sin movimiento. Todos con exportación a Excel.
 
@@ -183,16 +185,30 @@ Cada etapa va en su propia rama (`feat/...`), con un commit por cambio. Al final
 
 ---
 
-## 8. Preguntas para el cliente
+## 8. Decisiones del cliente (2 de noviembre de 2026)
 
-1. ¿El **administrador** ve y opera **todas las tiendas** o solo la suya?
-2. ¿El administrador puede **editar el precio a mano** en una venta (descuentos especiales)? ¿O los precios solo salen de la regla minorista/mayorista?
-3. **Venta rápida** (una venta sin productos, solo con descripción): ¿la eliminamos? En ropa descuadra el stock.
-4. ¿Venden **servicios** (arreglos, bastas, delivery)? Si no, se oculta el módulo de servicios.
-5. ¿Se permite **vender sin stock** (stock negativo)? Recomendación: no, salvo para el administrador.
-6. Autorización del administrador para 1 prenda: ¿con **correo y contraseña** o con un **PIN de 4–6 dígitos**?
-7. **Cambios de talla o color:** ¿nota de crédito + nueva boleta, o cambio directo sin comprobante cuando el precio es el mismo? (Lo más seguro ante SUNAT es la primera opción.)
-8. ¿Hay **ventas a crédito** para mayoristas (pagar después)? No está incluido en este plan.
-9. "Desde 2 prendas": ¿**cualquier combinación** de modelos, o 2 prendas del **mismo modelo**?
-10. Stock bajo de 20: ¿por **cada talla y color** en cada almacén, o por **modelo completo**?
-11. ¿Quieren una **tienda web o catálogo** público (la ruta `/ropa`)? Por ahora se desactiva.
+| # | Tema | Decisión | Cómo queda en el sistema |
+|---|---|---|---|
+| 1 | Alcance del administrador | Ve y opera **todas las tiendas** | El rol `administrador` no se filtra por `branch_id` (como `super_admin` hoy) |
+| 2 | Precio manual | El administrador **sí puede editar el precio** en una venta | Permiso `edit_sale_price` solo para el administrador; la línea queda con `price_reason = manual` y el usuario que lo cambió. El vendedor nunca edita precios |
+| 3 | Venta rápida | **Se elimina**, pero queda registro | Ya no se pueden crear ventas rápidas. Las que existan siguen visibles, solo lectura, con la etiqueta "Venta rápida (función retirada)". El retiro queda anotado en la bitácora del sistema |
+| 4 | Servicios | Solo **delivery**, y solo en algunos productos | El módulo de servicios se reduce a delivery. El modelo tiene la casilla `permite_delivery`, y el delivery solo se puede agregar si la venta incluye al menos un producto que lo permita. El delivery **no cuenta** para el mínimo de 2 prendas |
+| 5 | Stock negativo | **No, para nadie** | La venta se bloquea en el servidor si el stock del almacén no alcanza, con el bloqueo de fila al descontar |
+| 6 | Autorización de 1 prenda | **PIN** + aviso al administrador | El vendedor envía una *solicitud de precio mayorista*. El administrador recibe una notificación en el sistema (campana y lista "Aprobaciones pendientes") y aprueba o rechaza con su PIN de 4–6 dígitos (guardado cifrado). El administrador también puede ingresar su PIN directamente en el punto de venta si está presente |
+| 7 | Cambios de talla o color | **Nota de crédito + nueva boleta** | Hace falta una nota de crédito **parcial** (por ítem), que hoy no existe (H11) |
+| 8 | Crédito para mayoristas | **Sí, se agrega** | Nueva etapa de cuentas por cobrar (ver abajo) |
+| 9 | Mínimo de prendas | **Cualquier combinación de modelos**, configurable | `company_settings.wholesale_min_qty` (por defecto 2) |
+| 10 | Stock bajo | **Por talla y color** en cada almacén | Umbral global de 20, con excepción opcional por modelo |
+| 11 | Tienda web `/ropa` | **Se desactiva** por ahora | Ruta eliminada; `is_web_visible` queda para el futuro |
+
+### Cambios al plan por estas decisiones
+
+- **Etapa 4:** se agregan la tabla `wholesale_price_requests` (venta en borrador, cliente, ítems, solicitado por, estado pendiente/aprobado/rechazado, aprobado por, fecha) y `users.approval_pin` (hash). Notificaciones en la base de datos de Filament para los administradores. La venta no se puede emitir mientras su solicitud esté pendiente.
+- **Etapa 5:** sin stock negativo (decisión 5).
+- **Etapa 8:** nota de crédito parcial (tipo 07, devolución por ítem) + nueva venta, enlazadas como "cambio". El stock devuelto entra con un movimiento `exchange_in`.
+- **Nueva etapa 8b — Ventas a crédito para mayoristas:**
+  - `customers`: `credit_enabled`, `credit_limit` y `credit_days`.
+  - `sales`: `payment_condition` (`contado` | `credito`) y `due_date`. La factura se envía a SUNAT con **forma de pago Crédito y sus cuotas**, como exige SUNAT.
+  - `customer_payments` (abonos): ingresan a la caja del día como un movimiento.
+  - Saldo por cliente, aviso cuando se pasa del límite (bloqueo; solo el administrador puede exceptuarlo), reporte de cuentas por cobrar y vencidas.
+  - Solo clientes mayoristas con crédito habilitado por el administrador.
