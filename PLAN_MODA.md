@@ -151,7 +151,7 @@ Un solo `PricingService` en el servidor, usado por el punto de venta, `CreateSal
 
 Cada etapa va en su propia rama (`feat/...`), con un commit por cambio. Al final de cada una hay que pasar `migrate:fresh --seed`, ejecutar las pruebas y dar un resumen. No se fusiona a `main` sin aprobación.
 
-**Etapa 0 — Preparación.** Nuevo `AGENTS.md` con las reglas de este proyecto. Ajustar `.env.example` (`APP_NAME="Rwarehouse Moda"`, base `rwarehouse_moda`, SUNAT en sandbox). Que `migrate:fresh --seed` funcione en una base vacía (H14): un `BranchSeeder` crea la "Tienda Principal" con su almacén y sus series, y las migraciones heredadas dejan de asumir que existe la tienda 1. **Excepción a la regla de no editar migraciones antiguas:** este proyecto todavía no tiene base en producción, así que esas 4 migraciones se corrigen en el mismo archivo. Crear la migración de `brands` (H7).
+**Etapa 0 — Preparación.** Nuevo `AGENTS.md` con las reglas de este proyecto. Ajustar `.env.example` (`APP_NAME="Rwarehouse Moda"`, base `rwarehouse_moda`, SUNAT en sandbox). Que `migrate:fresh --seed` funcione en una base vacía (H14): una migración nueva (`2026_10_05_000000_ensure_default_branch`) crea la "Tienda Principal" antes de las migraciones de multisucursal, sin editar las antiguas, y `InitialSetupSeeder` crea la configuración de la empresa con SUNAT en sandbox y las series F001, B001 y NV01. Crear la migración de `brands` (H7).
 
 **Etapa 1 — Limpieza de repuestos.** Quitar los campos de repuestos (migración, `ProductResource`, tablas, importadores), el "Repuesto genérico", los textos de "repuesto"/Mangui, `/descargar-manual` y `/ropa` (o dejarla detrás de un interruptor). Quitar el hook de `Product::saved` (H3). `is_web_visible` pasa a `default(false)`.
 
