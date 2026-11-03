@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             SunatCatalogsSeeder::class,
             InitialSetupSeeder::class,
+            FashionCatalogSeeder::class,
             RolesSeeder::class,
             AdminUserSeeder::class,
         ]);

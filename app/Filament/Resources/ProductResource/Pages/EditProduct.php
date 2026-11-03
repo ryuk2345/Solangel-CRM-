@@ -22,7 +22,7 @@ class EditProduct extends EditRecord
         if ($user && !$user->seesAllBranches()) {
             $branchIds = $this->record->branches->pluck('id');
             if ($branchIds->count() > 1) {
-                abort(403, 'Este producto está compartido entre varias tiendas. Solo un administrador (super_admin) puede editarlo.');
+                abort(403, 'Este producto está compartido entre varias tiendas. Solo el administrador puede editarlo.');
             }
             if (!$branchIds->contains($user->branch_id ?? 1)) {
                 abort(403, 'No tienes permiso para editar un producto que no pertenece a tu tienda.');
@@ -110,18 +110,12 @@ class EditProduct extends EditRecord
     {
         return [
             Actions\DeleteAction::make()
-                ->visible(function () {
-                    $user = Auth::user();
-                    if (!$user) return false;
-                    if ($user->seesAllBranches()) return true;
-                    $branchIds = $this->record->branches->pluck('id');
-                    return $branchIds->count() === 1 && $branchIds->contains($user->branch_id ?? 1);
-                }),
+                ->visible(fn () => ProductResource::userCanManage($this->record)),
         ];
     }
 
-    protected function getRedirectUrl(): string
+    protected function getRedirectUrl(): ?string
     {
-        return $this->getResource()::getUrl('index');
+        return null; // se queda en el modelo para seguir editando variantes
     }
 }

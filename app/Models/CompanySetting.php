@@ -27,9 +27,27 @@ class CompanySetting extends Model
         'department',
         'province',
         'district',
+        'wholesale_min_qty',
+        'low_stock_threshold',
     ];
 
     protected $casts = [
         'sunat_sandbox' => 'boolean',
     ];
+
+    /** Configuración única de la empresa (cacheada durante la petición). */
+    public static function current(): ?self
+    {
+        return once(fn () => static::query()->first());
+    }
+
+    public static function wholesaleMinQty(): int
+    {
+        return max(1, (int) (static::current()?->wholesale_min_qty ?? 2));
+    }
+
+    public static function lowStockThreshold(): int
+    {
+        return (int) (static::current()?->low_stock_threshold ?? 20);
+    }
 }

@@ -16,12 +16,12 @@ class ServiceResource extends Resource
     protected static ?string $model = \App\Models\Service::class;
     
     // 🌟 Icono de herramientas y menú separado
-    protected static ?string $navigationIcon = 'heroicon-o-wrench-screwdriver';
+    protected static ?string $navigationIcon = 'heroicon-o-truck';
     protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 2;
-    protected static ?string $modelLabel = 'Servicio';
-    protected static ?string $pluralModelLabel = 'Servicios';
-    protected static ?string $navigationLabel = 'Servicios';
+    protected static ?int $navigationSort = 3;
+    protected static ?string $modelLabel = 'Delivery';
+    protected static ?string $pluralModelLabel = 'Delivery';
+    protected static ?string $navigationLabel = 'Delivery';
 
     public static function form(Form $form): Form
     {
@@ -30,12 +30,12 @@ class ServiceResource extends Resource
                 Forms\Components\Section::make('Detalles del Servicio')
                     ->schema([
                         Forms\Components\TextInput::make('name')
-                            ->label('Nombre del Servicio')
+                            ->label('Nombre (ej. Delivery Lima Metropolitana)')
                             ->required()
                             ->maxLength(255),
 
                         Forms\Components\TextInput::make('sale_price')
-                            ->label('Precio del Servicio')
+                            ->label('Precio sugerido (S/)')
                             ->required()
                             ->numeric()
                             ->prefix('S/'),
