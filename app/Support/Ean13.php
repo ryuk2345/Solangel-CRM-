@@ -55,4 +55,34 @@ class Ean13
 
         return $bits . '101';
     }
+
+    /**
+     * Código de barras como imagen PNG (data URI) para las etiquetas en PDF.
+     * Cada módulo mide $module píxeles; incluye 9 módulos de margen a cada lado.
+     */
+    public static function pngDataUri(string $code, int $module = 4, int $height = 120): string
+    {
+        $bits = self::pattern($code);
+        $quiet = 9;
+        $width = (strlen($bits) + $quiet * 2) * $module;
+
+        $img = imagecreate($width, $height);
+        $white = imagecolorallocate($img, 255, 255, 255);
+        $black = imagecolorallocate($img, 0, 0, 0);
+        imagefill($img, 0, 0, $white);
+
+        foreach (str_split($bits) as $i => $bit) {
+            if ($bit === '1') {
+                $x = ($quiet + $i) * $module;
+                imagefilledrectangle($img, $x, 0, $x + $module - 1, $height - 1, $black);
+            }
+        }
+
+        ob_start();
+        imagepng($img);
+        $png = ob_get_clean();
+        imagedestroy($img);
+
+        return 'data:image/png;base64,' . base64_encode($png);
+    }
 }

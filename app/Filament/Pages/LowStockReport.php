@@ -45,7 +45,7 @@ class LowStockReport extends Page implements HasTable
                 Tables\Columns\TextColumn::make('warehouse.branch.name')->label('Tienda')->toggleable(),
                 Tables\Columns\TextColumn::make('warehouse.name')->label('Almacén'),
                 Tables\Columns\TextColumn::make('productVariant.product.name')->label('Modelo')->wrap()
-                    ->searchable(query: fn (Builder $q, string $s) => $q->where('lsp.name', 'like', "%{$s}%")),
+                    ->searchable(query: fn (Builder $query, string $search) => $query->where('lsp.name', 'like', "%{$search}%")),
                 Tables\Columns\TextColumn::make('productVariant.color_name')->label('Color'),
                 Tables\Columns\TextColumn::make('productVariant.size')->label('Talla'),
                 Tables\Columns\TextColumn::make('productVariant.sku')->label('SKU')->toggleable(),
@@ -57,7 +57,7 @@ class LowStockReport extends Page implements HasTable
             ])
             ->filters([
                 Tables\Filters\Filter::make('agotados')->label('Solo agotados')->toggle()
-                    ->query(fn (Builder $q) => $q->where('inventories.stock', '<=', 0)),
+                    ->query(fn (Builder $query) => $query->where('inventories.stock', '<=', 0)),
                 Tables\Filters\SelectFilter::make('warehouse_id')->label('Almacén')
                     ->relationship('warehouse', 'name')->preload(),
             ])

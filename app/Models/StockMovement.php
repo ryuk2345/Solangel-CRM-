@@ -15,6 +15,7 @@ class StockMovement extends Model
         'sale' => 'Venta',
         'sale_void' => 'Anulación de venta',
         'purchase' => 'Compra',
+        'purchase_void' => 'Compra anulada',
         'adjustment' => 'Ajuste de inventario',
         'transfer_out' => 'Traspaso (salida)',
         'transfer_in' => 'Traspaso (entrada)',

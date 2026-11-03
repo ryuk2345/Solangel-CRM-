@@ -18,4 +18,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/caja/cierre-pdf/{id}', [CashRegisterController::class, 'imprimirCierre'])->name('caja.imprimir_cierre');
     Route::get('/despatches/{despatch}/pdf', [\App\Http\Controllers\DespatchPrintController::class, 'pdf'])->name('despatches.pdf');
     Route::get('/quotations/{quotation}/pdf', [\App\Http\Controllers\QuotationPrintController::class, 'pdf'])->name('quotations.pdf');
+
+    // Etiquetas con código de barras
+    Route::get('/etiquetas/compra/{purchase}', [\App\Http\Controllers\LabelController::class, 'purchase'])->name('labels.purchase');
+    Route::get('/etiquetas', [\App\Http\Controllers\LabelController::class, 'custom'])->name('labels.custom');
 });
