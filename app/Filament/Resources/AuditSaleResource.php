@@ -18,8 +18,8 @@ class AuditSaleResource extends Resource
     protected static ?string $model = \App\Models\AuditSale::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-check';
-    protected static ?string $navigationGroup = '3. Administración';
-    protected static ?int $navigationSort = 1;
+    protected static ?string $navigationGroup = 'Administración';
+    protected static ?int $navigationSort = 4;
     protected static ?string $modelLabel = 'Auditoría de Venta';
 
     public static function form(Form $form): Form

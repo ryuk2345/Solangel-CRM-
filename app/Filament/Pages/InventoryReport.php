@@ -17,8 +17,9 @@ class InventoryReport extends Page implements HasForms
     use HasPageShield;
     use InteractsWithForms;
 
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-presentation-chart-line';
-    protected static ?string $navigationGroup = '3. Administración';
+    protected static ?string $navigationGroup = 'Administración';
     protected static ?string $navigationLabel = 'Curva rota y stock sin movimiento';
     protected static ?string $title = 'Curva rota y stock sin movimiento';
     protected static ?int $navigationSort = 2;

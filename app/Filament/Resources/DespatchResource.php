@@ -26,8 +26,8 @@ class DespatchResource extends Resource
     protected static ?string $model = Despatch::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-truck';
-    protected static ?string $navigationGroup = '3. Administración';
-    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = 'Administración';
+    protected static ?int $navigationSort = 2;
     protected static ?string $modelLabel = 'Guía de Remisión';
     protected static ?string $pluralModelLabel = 'Guías de Remisión';
 

@@ -1,4 +1,6 @@
 <x-filament-panels::page>
+    @include('filament.components.report-tabs', ['active' => 'inventory'])
+
     <form wire:submit.prevent>{{ $this->form }}</form>
 
     @php($broken = $this->getBroken())

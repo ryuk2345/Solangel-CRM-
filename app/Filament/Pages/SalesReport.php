@@ -19,10 +19,10 @@ class SalesReport extends Page implements HasForms
     use InteractsWithForms;
 
     protected static ?string $navigationIcon = 'heroicon-o-chart-bar';
-    protected static ?string $navigationGroup = '3. Administración';
-    protected static ?string $navigationLabel = 'Ventas por talla y color';
-    protected static ?string $title = 'Ventas por talla, color, temporada y canal';
-    protected static ?int $navigationSort = 1;
+    protected static ?string $navigationGroup = 'Administración';
+    protected static ?string $navigationLabel = 'Reportes';
+    protected static ?string $title = 'Reportes';
+    protected static ?int $navigationSort = 5;
     protected static string $view = 'filament.pages.sales-report';
 
     public ?array $data = [];

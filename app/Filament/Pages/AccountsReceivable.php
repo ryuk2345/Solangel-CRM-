@@ -20,12 +20,13 @@ class AccountsReceivable extends Page implements HasTable
     use HasPageShield;
     use InteractsWithTable;
 
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-calendar-days';
-    protected static ?string $navigationGroup = '1. Ventas y Cajas';
+    protected static ?string $navigationGroup = 'Administración';
     protected static ?string $navigationLabel = 'Cuentas por cobrar';
     protected static ?string $title = 'Cuentas por cobrar';
     protected static ?int $navigationSort = 6;
-    protected static string $view = 'filament.pages.table-page';
+    protected static string $view = 'filament.pages.accounts-receivable';
 
     public static function getNavigationBadge(): ?string
     {

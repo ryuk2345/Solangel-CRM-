@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Builder;
 class StockMovementResource extends Resource
 {
     protected static ?string $model = StockMovement::class;
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
+    protected static ?string $navigationGroup = 'Administración';
     protected static ?string $navigationIcon = 'heroicon-o-arrows-right-left';
     protected static ?string $navigationLabel = 'Kardex';
     protected static ?string $modelLabel = 'Movimiento de stock';

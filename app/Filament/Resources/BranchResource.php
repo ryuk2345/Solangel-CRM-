@@ -22,9 +22,10 @@ class BranchResource extends Resource
     protected static ?string $model = Branch::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-building-storefront';
-    protected static ?string $navigationGroup = '3. Administración';
-    protected static ?int $navigationSort = 2;
+    protected static ?string $navigationGroup = 'Administración';
+    protected static ?int $navigationSort = 1;
     protected static ?string $modelLabel = 'Sucursal';
+    protected static ?string $pluralModelLabel = 'Sucursales';
 
     public static function form(\Filament\Forms\Form $form): \Filament\Forms\Form
     {
