@@ -89,19 +89,7 @@ class EditStockTransfer extends EditRecord
 
                 // Incrementar stock en el almacén de destino
                 if ($qtyReceived > 0) {
-                    $destInv = Inventory::firstOrCreate(
-                        [
-                            'product_variant_id' => $transferItem->product_variant_id,
-                            'warehouse_id' => $lockedTransfer->destination_warehouse_id,
-                        ],
-                        [
-                            'branch_id' => $lockedTransfer->destination_branch_id,
-                            'stock' => 0,
-                        ]
-                    );
-
-                    $destInv = Inventory::where('id', $destInv->id)->lockForUpdate()->first();
-                    $destInv->increment('stock', $qtyReceived);
+                    \App\Services\StockService::move((int) $transferItem->product_variant_id, (int) $lockedTransfer->destination_warehouse_id, (int) $qtyReceived, 'transfer_in', $lockedTransfer, "Recepción traspaso {$lockedTransfer->number}");
                 }
             }
 

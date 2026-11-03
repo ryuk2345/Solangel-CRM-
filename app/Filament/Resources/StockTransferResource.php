@@ -475,18 +475,7 @@ class StockTransferResource extends Resource
                                 ]);
 
                                 if ($receivedQty > 0) {
-                                    $destInv = Inventory::firstOrCreate(
-                                        [
-                                            'product_variant_id' => $item->product_variant_id,
-                                            'warehouse_id' => $locked->destination_warehouse_id,
-                                        ],
-                                        [
-                                            'branch_id' => $locked->destination_branch_id,
-                                            'stock' => 0,
-                                        ]
-                                    );
-                                    $destInv = Inventory::where('id', $destInv->id)->lockForUpdate()->first();
-                                    $destInv->increment('stock', $receivedQty);
+                                    \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->destination_warehouse_id, (int) $receivedQty, 'transfer_in', $locked, "Recepción traspaso {$locked->number}");
                                 }
                             }
 
@@ -537,14 +526,7 @@ class StockTransferResource extends Resource
                             }
 
                             foreach ($locked->items as $item) {
-                                $origInv = Inventory::where('product_variant_id', $item->product_variant_id)
-                                    ->where('warehouse_id', $locked->origin_warehouse_id)
-                                    ->lockForUpdate()
-                                    ->first();
-
-                                if ($origInv) {
-                                    $origInv->increment('stock', $item->quantity_sent);
-                                }
+                                \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->origin_warehouse_id, (int) $item->quantity_sent, 'transfer_return', $locked, "Traspaso anulado {$locked->number}");
                             }
 
                             $locked->update([

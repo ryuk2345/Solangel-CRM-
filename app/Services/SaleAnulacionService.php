@@ -235,28 +235,15 @@ class SaleAnulacionService
                 continue;
             }
 
-            $inventario = Inventory::where('product_variant_id', $item->product_variant_id)
-                ->where('warehouse_id', $warehouseId)
-                ->lockForUpdate()
-                ->first();
-
-            if (!$inventario) {
-                $inventario = Inventory::firstOrCreate(
-                    [
-                        'product_variant_id' => $item->product_variant_id,
-                        'warehouse_id' => $warehouseId,
-                    ],
-                    [
-                        'branch_id' => $sale->branch_id,
-                        'stock' => 0,
-                    ]
-                );
-                $inventario = Inventory::where('id', $inventario->id)->lockForUpdate()->first();
-            }
-
-            if ($inventario) {
-                $inventario->increment('stock', $item->quantity);
-            }
+            // Devuelve el stock por el kardex (movimiento 'sale_void' enlazado a la venta)
+            StockService::move(
+                (int) $item->product_variant_id,
+                (int) $warehouseId,
+                (int) $item->quantity,
+                'sale_void',
+                $sale,
+                "Anulación {$sale->serie}-{$sale->correlative}",
+            );
         }
     }
 }

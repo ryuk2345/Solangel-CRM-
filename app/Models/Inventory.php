@@ -40,4 +40,30 @@ class Inventory extends Model
     {
         return $this->belongsTo(Warehouse::class);
     }
+
+    /**
+     * Stock bajo por talla y color en cada almacén (decisión 10): stock <= umbral del modelo
+     * o, si el modelo no tiene uno propio, el general de la empresa (20 por defecto).
+     */
+    public function scopeLowStock($query)
+    {
+        $global = CompanySetting::lowStockThreshold();
+
+        return $query
+            ->join('product_variants as lsv', 'lsv.id', '=', 'inventories.product_variant_id')
+            ->join('products as lsp', 'lsp.id', '=', 'lsv.product_id')
+            ->where('lsp.is_service', false)
+            ->whereRaw('inventories.stock <= COALESCE(lsp.low_stock_threshold, ?)', [$global])
+            ->select('inventories.*');
+    }
+
+    public function getLowStockThresholdAttribute(): int
+    {
+        return $this->productVariant?->product?->lowStockThreshold() ?? CompanySetting::lowStockThreshold();
+    }
+
+    public function getIsLowStockAttribute(): bool
+    {
+        return (int) $this->stock <= $this->low_stock_threshold;
+    }
 }

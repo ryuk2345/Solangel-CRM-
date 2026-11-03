@@ -13,7 +13,16 @@ class ListInventories extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            Actions\CreateAction::make(),
+            Actions\Action::make('matriz')
+                ->label('Matriz talla × color')
+                ->icon('heroicon-o-table-cells')
+                ->color('gray')
+                ->url(\App\Filament\Pages\StockMatrix::getUrl()),
+            Actions\Action::make('reposicion')
+                ->label('Reporte de stock bajo')
+                ->icon('heroicon-o-exclamation-triangle')
+                ->color('warning')
+                ->url(\App\Filament\Pages\LowStockReport::getUrl()),
         ];
     }
 }
