@@ -28,6 +28,7 @@ class RolesSeeder extends Seeder
         'void_sale'                 => 'Anular ventas y emitir notas de crédito',
         'manage_credit'             => 'Habilitar crédito a clientes y exceder el límite',
         'print_labels'              => 'Imprimir etiquetas',
+        'exchange_sale'             => 'Registrar cambios de talla o color (nota de crédito parcial)',
     ];
 
     private const READ = ['view_any', 'view'];
@@ -63,10 +64,11 @@ class RolesSeeder extends Seeder
                 'customer::payment' => ['view_any', 'view', 'create'],
                 'cash::register' => self::WRITE,
                 'wholesale::price::request' => ['view_any', 'view', 'create'],
+                'sale::return' => ['view_any', 'view'],
                 'product' => self::READ,
                 'product::variant' => self::READ,
                 'inventory' => self::READ,
-            ], ['page_Dashboard', 'page_StockMatrix', 'widget_LatestSalesWidget']),
+            ], ['page_Dashboard', 'page_StockMatrix', 'widget_LatestSalesWidget', 'exchange_sale']),
 
             'almacenero' => $this->pick($all, [
                 'product' => self::WRITE,

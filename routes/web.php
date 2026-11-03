@@ -19,6 +19,9 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/despatches/{despatch}/pdf', [\App\Http\Controllers\DespatchPrintController::class, 'pdf'])->name('despatches.pdf');
     Route::get('/quotations/{quotation}/pdf', [\App\Http\Controllers\QuotationPrintController::class, 'pdf'])->name('quotations.pdf');
 
+    // Cambios y devoluciones (nota de crédito parcial o comprobante interno)
+    Route::get('/cambios/{return}/ticket', [SalePrintController::class, 'ticketDevolucion'])->name('sale-returns.ticket');
+
     // Etiquetas con código de barras
     Route::get('/etiquetas/compra/{purchase}', [\App\Http\Controllers\LabelController::class, 'purchase'])->name('labels.purchase');
     Route::get('/etiquetas', [\App\Http\Controllers\LabelController::class, 'custom'])->name('labels.custom');

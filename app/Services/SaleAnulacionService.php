@@ -30,6 +30,13 @@ class SaleAnulacionService
             ];
         }
 
+        // 1b. Si ya hubo cambios o devoluciones parciales, la nota de crédito total duplicaría el crédito
+        if ($sale->returns()->exists()) {
+            return [
+                'error' => 'Esta venta tiene cambios o devoluciones registradas. Para devolver el resto de prendas usa "Cambio / devolución".',
+            ];
+        }
+
         // 2. Control contra anulación duplicada
         if ($sale->sunat_status === 'anulado') {
             return [

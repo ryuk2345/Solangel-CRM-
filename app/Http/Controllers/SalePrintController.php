@@ -279,6 +279,41 @@ class SalePrintController extends Controller
     }
 
     /**
+     * Ticket de un cambio o devolución: la nota de crédito parcial (boleta/factura)
+     * o un comprobante interno si la venta fue nota de venta.
+     */
+    public function ticketDevolucion(\App\Models\SaleReturn $return)
+    {
+        $sale = $return->sale;
+        $this->validarAccesoSucursal($sale);
+
+        if ($return->sunat_status === 'aceptado' && $return->credit_note_serie) {
+            $ruc = \App\Models\CompanySetting::first()?->ruc ?? env('EMPRESA_RUC');
+            $base = "{$ruc}-07-{$return->credit_note_serie}-" . str_pad($return->credit_note_correlative, 8, '0', STR_PAD_LEFT);
+            $xml = storage_path("app/sunat/xmls/{$base}.xml");
+            $nota = \App\Services\SunatNoteReader::parseXmlNota($xml, '07');
+
+            if ($nota) {
+                $nota['tipo'] = 'credito';
+                $nota['tipo_doc'] = '07';
+                $datos = $this->generarDatosNota($sale, $nota, 'credito');
+                $alto = 520 + count($nota['items'] ?? []) * 40 + (!empty($nota['hash']) ? 155 : 0);
+                $pdf = Pdf::loadView('tickets.nota_ticket', $datos)->setPaper([0, 0, 226.77, $alto], 'portrait');
+
+                return $pdf->stream('NotaCredito-' . $nota['full_number'] . '.pdf');
+            }
+        }
+
+        $return->loadMissing(['items', 'user', 'newSale', 'sale.customer']);
+        $empresa = \App\Models\CompanySetting::first();
+        $alto = 380 + $return->items->count() * 40;
+        $pdf = Pdf::loadView('tickets.devolucion_interna', compact('return', 'sale', 'empresa'))
+            ->setPaper([0, 0, 226.77, $alto], 'portrait');
+
+        return $pdf->stream("Cambio-{$return->id}.pdf");
+    }
+
+    /**
      * Imprime la representación impresa en formato A4 de la Nota de Crédito o Débito.
      */
     public function a4Nota(Sale $sale, string $tipo = 'credito')

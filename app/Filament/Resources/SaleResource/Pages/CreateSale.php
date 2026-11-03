@@ -27,6 +27,7 @@ class CreateSale extends CreateRecord
     public function mount(): void
     {
         parent::mount();
+        $this->precargarCambio();
         $user = Auth::user();
         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
 
@@ -77,6 +78,29 @@ class CreateSale extends CreateRecord
         }
     }
 
+    /** /admin/sales/create?cambio=ID: venta nueva de un cambio de talla, con el saldo a favor. */
+    private function precargarCambio(): void
+    {
+        $returnId = (int) request()->query('cambio');
+        if (!$returnId) {
+            return;
+        }
+
+        $return = \App\Models\SaleReturn::with('sale')->find($returnId);
+        if (!$return || $return->available_credit <= 0) {
+            Notification::make()->title('Ese cambio ya no tiene saldo a favor')->warning()->send();
+
+            return;
+        }
+
+        $this->data['customer_id'] = $return->sale->customer_id;
+        $this->data['branch_id'] = $return->branch_id;
+        $this->data['warehouse_id'] = $return->warehouse_id;
+        $this->data['exchange_return_id'] = $return->id;
+        $this->data['items'] = [];
+        $this->data['payments'] = [['payment_method' => 'efectivo', 'amount' => 0]];
+    }
+
     // 2. ANTES DE GUARDAR: Validamos sucursal y asignamos número con candado
     protected function mutateFormDataBeforeCreate(array $data): array
     {
@@ -110,12 +134,25 @@ class CreateSale extends CreateRecord
             $this->halt();
         }
 
+        // Cambio de talla: saldo a favor de la devolución y modo de precio de la venta original
+        $exchangeReturn = !empty($this->data['exchange_return_id']) ? \App\Models\SaleReturn::with('sale')->find($this->data['exchange_return_id']) : null;
+        $credit = $exchangeReturn ? (float) $exchangeReturn->available_credit : 0.0;
+        if ($exchangeReturn && $credit <= 0) {
+            Notification::make()->title('El saldo a favor de este cambio ya se usó')->danger()->persistent()->send();
+            $this->halt();
+        }
+        if ($exchangeReturn && (int) $exchangeReturn->sale?->customer_id !== (int) ($data['customer_id'] ?? 0)) {
+            Notification::make()->title('El cambio debe hacerse al mismo cliente de la venta original')->danger()->send();
+            $this->halt();
+        }
+
         $pricing = \App\Services\PricingService::apply(
             $items,
             isset($data['customer_id']) ? (int) $data['customer_id'] : null,
             isset($data['branch_id']) ? (int) $data['branch_id'] : null,
             $requestId ? (int) $requestId : null,
             Auth::user(),
+            $exchangeReturn?->sale?->price_mode,
         );
 
         // Delivery solo si alguna prenda lo permite (decisión 4)
@@ -147,7 +184,17 @@ class CreateSale extends CreateRecord
         $this->data['items'] = $pricing['lines'];
         $data['price_mode'] = $pricing['mode'];
         $data['wholesale_request_id'] = $pricing['reason'] === 'authorized' ? (int) $requestId : null;
+        $data['exchange_return_id'] = $exchangeReturn?->id;
         $totalVenta = $pricing['total'];
+
+        if ($exchangeReturn && $totalVenta + 0.001 < $credit) {
+            Notification::make()
+                ->title('El cambio debe ser por un monto igual o mayor')
+                ->body('El saldo a favor es S/ ' . number_format($credit, 2) . ' y la venta suma S/ ' . number_format($totalVenta, 2)
+                    . '. Agrega otra prenda, o pide al administrador una devolución de dinero.')
+                ->danger()->persistent()->send();
+            $this->halt();
+        }
 
         // ─── 1.5. BLOQUEAR LÍNEAS EN PRECIO 0 PARA BOLETAS Y FACTURAS ───
         $esElectronico = !str_starts_with(trim((string)($data['serie'] ?? '')), 'NV');
@@ -185,7 +232,12 @@ class CreateSale extends CreateRecord
         }
 
         // ─── 2. VALIDAR Y NORMALIZAR DESGLOSE DE PAGOS (Antes del candado) ───
-        $rawPayments = collect($this->data['payments'] ?? $data['payments'] ?? []);
+        // En un cambio, el saldo a favor paga primero; el resto se cobra con los medios elegidos
+        $rawPayments = collect($this->data['payments'] ?? $data['payments'] ?? [])
+            ->reject(fn ($p) => ($p['payment_method'] ?? null) === 'nota_credito');
+        $creditApplied = round(min($credit, $totalVenta), 2);
+        $totalVentaOriginal = $totalVenta;
+        $totalVenta = round($totalVenta - $creditApplied, 2);
 
         // En pagos mixtos, descartar filas con monto <= 0
         if ($rawPayments->count() > 1) {
@@ -221,6 +273,15 @@ class CreateSale extends CreateRecord
             $this->data['payments'] = $rawPayments->values()->toArray();
             $data['payment_method'] = 'múltiple';
         }
+
+        if ($creditApplied > 0) {
+            $this->data['payments'] = collect($this->data['payments'])
+                ->filter(fn ($p) => (float) ($p['amount'] ?? 0) > 0)
+                ->prepend(['payment_method' => 'nota_credito', 'amount' => $creditApplied])
+                ->values()->toArray();
+            $data['payment_method'] = count($this->data['payments']) > 1 ? 'múltiple' : 'nota_credito';
+        }
+        $totalVenta = $totalVentaOriginal;
 
         // Evitar duplicaciones por doble click (seguridad extra de 5 segundos para quien hace clic)
         $ultimaVentaReciente = \App\Models\Sale::where(function ($q) {
@@ -413,6 +474,16 @@ class CreateSale extends CreateRecord
         // ── 3. La aprobación de precio mayorista queda usada por esta venta ──
         \App\Services\WholesaleApprovalService::markUsed($venta->wholesale_request_id, $venta);
 
+        // ── 3b. Cambio de talla: el saldo a favor queda usado por esta venta (una sola vez) ──
+        if ($venta->exchange_return_id) {
+            try {
+                \App\Services\SaleExchangeService::linkNewSale((int) $venta->exchange_return_id, $venta);
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                Notification::make()->title(collect($e->errors())->flatten()->first())->danger()->persistent()->send();
+                $this->halt(shouldRollbackDatabaseTransaction: true);
+            }
+        }
+
         // ── 4. Pagos y caja ──
         $this->sincronizarPagosYCaja($venta);
 
@@ -492,7 +563,7 @@ class CreateSale extends CreateRecord
         }
 
         try {
-            $service = new \App\Services\SunatService();
+            $service = app(\App\Services\SunatService::class);
             $res     = $service->enviarBoleta($venta);
 
             if (isset($res['success']) && $res['success'] === true) {

@@ -71,6 +71,7 @@ class ScreensSmokeTest extends TestCase
             Resources\QuotationResource\Pages\ListQuotations::class,
             Resources\QuotationResource\Pages\CreateQuotation::class,
             Resources\WholesalePriceRequestResource\Pages\ListWholesalePriceRequests::class,
+            Resources\SaleReturnResource\Pages\ListSaleReturns::class,
             Resources\CustomerResource\Pages\ListCustomers::class,
             Resources\StockTransferResource\Pages\ListStockTransfers::class,
             Resources\StockTransferResource\Pages\CreateStockTransfer::class,

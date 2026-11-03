@@ -617,6 +617,33 @@ class SaleResource extends Resource
                     ]),
 
                 // ==========================================
+                // CAMBIO DE TALLA / COLOR: saldo a favor de la nota de crédito
+                // ==========================================
+                Forms\Components\Section::make('Cambio de talla o color')
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->visible(fn (Get $get) => filled($get('exchange_return_id')))
+                    ->schema([
+                        Forms\Components\Hidden::make('exchange_return_id')->dehydrated(false),
+                        Forms\Components\Placeholder::make('exchange_info')
+                            ->hiddenLabel()
+                            ->content(function (Get $get) {
+                                $return = \App\Models\SaleReturn::with('sale')->find($get('exchange_return_id'));
+                                if (!$return) {
+                                    return '';
+                                }
+                                $credit = (float) $return->available_credit;
+                                $total = (float) collect($get('items') ?? [])->sum(fn ($i) => (float) ($i['total'] ?? 0));
+                                $nc = $return->credit_note_number ? " (nota de crédito {$return->credit_note_number})" : '';
+
+                                return new \Illuminate\Support\HtmlString(
+                                    '<div class="text-base"><strong>Saldo a favor: S/ ' . number_format($credit, 2) . '</strong>' . e($nc)
+                                    . ' · cambio de ' . e($return->sale?->serie . '-' . $return->sale?->correlative) . '<br>'
+                                    . 'El cliente paga solo la diferencia: <strong>S/ ' . number_format(max(0, $total - $credit), 2) . '</strong></div>'
+                                );
+                            }),
+                    ]),
+
+                // ==========================================
                 // PRECIO MAYORISTA PARA 1 PRENDA (cliente mayorista, con aprobación)
                 // ==========================================
                 Forms\Components\Section::make('Precio mayorista con aprobación')
@@ -1378,6 +1405,74 @@ class SaleResource extends Resource
                         ->visible(fn(Sale $record) => SunatNoteReader::buscarNotaParaVenta($record, 'debito') !== null),
 
                     // 🌟 ACCIÓN DE REGULARIZACIÓN DE NOTA DE CRÉDITO
+                    Tables\Actions\Action::make('cambio_devolucion')
+                        ->label('Cambio / devolución')
+                        ->icon('heroicon-o-arrows-right-left')
+                        ->color('warning')
+                        ->visible(fn (Sale $record) => auth()->user()?->can('exchange_sale')
+                            && !in_array($record->sunat_status, ['anulado', 'rechazado'], true)
+                            && blank($record->credit_note_serie)
+                            && !empty(\App\Services\SaleExchangeService::returnable($record)))
+                        ->modalHeading(fn (Sale $record) => "Cambio o devolución · {$record->serie}-{$record->correlative}")
+                        ->modalDescription('Las prendas devueltas vuelven al almacén. Si fue boleta o factura se emite una nota de crédito por esas prendas.')
+                        ->modalWidth('3xl')
+                        ->form(function (Sale $record) {
+                            $available = \App\Services\SaleExchangeService::returnable($record);
+                            $fields = [];
+                            foreach ($record->items()->whereIn('id', array_keys($available))->get() as $item) {
+                                $fields[] = Forms\Components\TextInput::make("qty.{$item->id}")
+                                    ->label($item->product_name . ' · S/ ' . number_format((float) $item->total / max(1, $item->quantity), 2))
+                                    ->helperText("Puede devolver hasta {$available[$item->id]}")
+                                    ->numeric()->minValue(0)->maxValue($available[$item->id])->default(0);
+                            }
+
+                            return [
+                                Forms\Components\Fieldset::make('Prendas que devuelve el cliente')->columns(1)->schema($fields),
+                                Forms\Components\Select::make('reason')->label('Motivo')->options(\App\Models\SaleReturn::REASONS)->required(),
+                                Forms\Components\ToggleButtons::make('type')
+                                    ->label('¿Qué hace el cliente?')
+                                    ->options(['cambio' => 'Cambia por otra prenda', 'devolucion' => 'Devolución de dinero (administrador)'])
+                                    ->default('cambio')
+                                    ->disableOptionWhen(fn (string $value) => $value === 'devolucion' && !auth()->user()?->can('void_sale'))
+                                    ->inline()
+                                    ->required(),
+                            ];
+                        })
+                        ->action(function (Sale $record, array $data, $livewire) {
+                            try {
+                                $return = \App\Services\SaleExchangeService::register($record, $data['qty'] ?? [], $data['type'], $data['reason']);
+                            } catch (\Illuminate\Validation\ValidationException $e) {
+                                Notification::make()->title('No se pudo registrar')->body(collect($e->errors())->flatten()->implode("\n"))->danger()->persistent()->send();
+
+                                return;
+                            }
+
+                            $nc = match ($return->sunat_status) {
+                                'aceptado' => "Nota de crédito {$return->credit_note_number} aceptada por SUNAT.",
+                                'interna' => 'Nota de venta interna: no requiere nota de crédito.',
+                                default => 'La nota de crédito quedó pendiente: reintenta desde "Cambios y devoluciones". ' . ($return->sunat_error ?? ''),
+                            };
+
+                            if ($return->type === 'devolucion') {
+                                try {
+                                    \App\Services\SaleExchangeService::refundCash($return, (float) $return->total);
+                                    $nc .= ' Se registró la salida de S/ ' . number_format((float) $return->total, 2) . ' de la caja.';
+                                } catch (\Illuminate\Validation\ValidationException $e) {
+                                    $nc .= ' ' . collect($e->errors())->flatten()->first();
+                                }
+                                Notification::make()->title('Devolución registrada')->body($nc)
+                                    ->{$return->sunat_status === 'pendiente' ? 'warning' : 'success'}()->persistent()->send();
+
+                                return;
+                            }
+
+                            Notification::make()->title('Prendas recibidas. Ahora registra la prenda nueva.')
+                                ->body('Saldo a favor: S/ ' . number_format((float) $return->total, 2) . '. ' . $nc)
+                                ->{$return->sunat_status === 'pendiente' ? 'warning' : 'success'}()->persistent()->send();
+
+                            $livewire->redirect(SaleResource::getUrl('create', ['cambio' => $return->id]));
+                        }),
+
                     Tables\Actions\Action::make('regularizar_nc')
                         ->label('Regularizar Nota de Crédito')
                         ->icon('heroicon-o-arrow-path-rounded-square')

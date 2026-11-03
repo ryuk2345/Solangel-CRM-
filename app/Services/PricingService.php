@@ -24,9 +24,11 @@ class PricingService
     /**
      * @param  array<int|string, array>  $lines  Cada línea: product_variant_id, quantity, y opcionalmente
      *                                           price (precio escrito en el formulario) y price_reason.
+     * @param  string|null  $exchangeMode  En un cambio de talla, el modo de la venta original: si fue mayorista,
+     *                                     la prenda de reemplazo conserva el precio mayorista.
      * @return array{lines: array, mode: string, garments: int, min: int, reason: ?string, total: float}
      */
-    public static function apply(array $lines, ?int $customerId, ?int $branchId, ?int $wholesaleRequestId = null, ?User $actor = null): array
+    public static function apply(array $lines, ?int $customerId, ?int $branchId, ?int $wholesaleRequestId = null, ?User $actor = null, ?string $exchangeMode = null): array
     {
         $min = CompanySetting::wholesaleMinQty();
         $variants = ProductVariant::with('product')
@@ -50,6 +52,10 @@ class PricingService
                 $mode = 'mayorista';
                 $reason = 'authorized';
             }
+        }
+        if ($mode === 'minorista' && $garments > 0 && $exchangeMode === 'mayorista') {
+            $mode = 'mayorista';
+            $reason = 'exchange';
         }
 
         $canEditPrice = (bool) $actor?->can('edit_sale_price');
@@ -116,9 +122,11 @@ class PricingService
             return 'Agrega prendas para calcular el precio.';
         }
         if ($result['mode'] === 'mayorista') {
-            return $result['reason'] === 'authorized'
-                ? "PRECIO MAYORISTA · autorizado por el administrador ({$result['garments']} prenda)"
-                : "PRECIO MAYORISTA · {$result['garments']} prendas";
+            return match ($result['reason']) {
+                'authorized' => "PRECIO MAYORISTA · autorizado por el administrador ({$result['garments']} prenda)",
+                'exchange' => 'PRECIO MAYORISTA · cambio de una venta mayorista',
+                default => "PRECIO MAYORISTA · {$result['garments']} prendas",
+            };
         }
         $missing = $result['min'] - $result['garments'];
 

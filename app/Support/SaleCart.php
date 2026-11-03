@@ -137,6 +137,7 @@ class SaleCart
             $get($prefix . 'branch_id') ? (int) $get($prefix . 'branch_id') : null,
             $get($prefix . 'wholesale_request_id') ? (int) $get($prefix . 'wholesale_request_id') : null,
             Auth::user(),
+            self::exchangeMode($get($prefix . 'exchange_return_id')),
         );
 
         $set($prefix . 'items', $result['lines']);
@@ -152,9 +153,16 @@ class SaleCart
             $get('branch_id') ? (int) $get('branch_id') : null,
             $get('wholesale_request_id') ? (int) $get('wholesale_request_id') : null,
             Auth::user(),
+            self::exchangeMode($get('exchange_return_id')),
         );
 
         return PricingService::summary($result);
+    }
+
+    /** Modo de precio de la venta original de un cambio (para conservar el precio mayorista). */
+    public static function exchangeMode($returnId): ?string
+    {
+        return $returnId ? \App\Models\SaleReturn::with('sale')->find($returnId)?->sale?->price_mode : null;
     }
 
     /** Cuántas prendas (sin servicios) hay en el detalle. */

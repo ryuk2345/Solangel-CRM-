@@ -578,6 +578,173 @@ class SunatService
             return ['error' => 'Error en el certificado o conexión: ' . $e->getMessage()];
         }
     }
+    /**
+     * Nota de crédito PARCIAL por las prendas devueltas en un cambio o devolución (Etapa 8).
+     * Motivo SUNAT 07: "Devolución por ítem". Reserva su correlativo en la serie 07 de la tienda
+     * (FC../BC..) y lo guarda en la devolución para reusarlo si hay que reintentar.
+     */
+    public function emitirNotaCreditoParcial(\App\Models\SaleReturn $return): array
+    {
+        try {
+            $this->ensureDirectoriesExist();
+
+            $venta = $return->sale()->with(['customer', 'branch'])->firstOrFail();
+            $branch = $venta->branch ?? \App\Models\Branch::find($venta->branch_id);
+            $sunatCode = trim($branch?->sunat_code ?? '');
+            $isPrincipal = !$branch || (int) $branch->id === 1;
+
+            if (!$isPrincipal && (empty($sunatCode) || $sunatCode === '0000')) {
+                return ['error' => "La sucursal '{$branch->name}' no tiene configurado un código de anexo SUNAT válido (distinto de 0000). No se pueden emitir Notas de Crédito."];
+            }
+
+            $serieOriginal = trim($venta->serie);
+            $tipoDocOriginal = str_starts_with($serieOriginal, 'F') ? '01' : '03';
+            $prefijoNC = (str_starts_with($serieOriginal, 'F') ? 'F' : 'B') . 'C';
+
+            $esReintento = !empty($return->credit_note_serie) && !empty($return->credit_note_correlative);
+            if ($esReintento) {
+                $serieNC = $return->credit_note_serie;
+                $correlativoNC = $return->credit_note_correlative;
+            } else {
+                $serieNC = null;
+                $correlativoNC = null;
+                \Illuminate\Support\Facades\DB::transaction(function () use (&$serieNC, &$correlativoNC, $venta, $prefijoNC, $return) {
+                    $serieModel = \App\Models\Serie::where('document_type', '07')
+                        ->where(fn ($q) => $q->where('branch_id', $venta->branch_id)->orWhere('branch_id', 1))
+                        ->where('serie', 'like', $prefijoNC . '%')
+                        ->where('is_active', true)
+                        ->orderByRaw('CASE WHEN branch_id = ? THEN 0 ELSE 1 END', [$venta->branch_id])
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$serieModel) {
+                        throw new \RuntimeException("No hay una serie de notas de crédito ({$prefijoNC}..) activa para esta tienda.");
+                    }
+
+                    $serieNC = $serieModel->serie;
+                    $correlativoNC = $serieModel->current_number;
+                    $serieModel->increment('current_number');
+
+                    $return->update(['credit_note_serie' => $serieNC, 'credit_note_correlative' => $correlativoNC]);
+                });
+            }
+
+            $note = $this->buildNotaCreditoParcial($return, $venta, $branch, $serieNC, (int) $correlativoNC);
+
+            $see = $this->getSee();
+            $result = $see->send($note);
+            file_put_contents(storage_path("app/sunat/xmls/{$note->getName()}.xml"), $see->getFactory()->getLastXml());
+
+            if (!$result->isSuccess()) {
+                $err = $result->getError();
+                $errCode = (string) ($err ? $err->getCode() : '');
+                $errMsg = (string) ($err ? $err->getMessage() : '');
+
+                if (str_contains($errMsg, 'Unauthorized') || $errCode === 'HTTP') {
+                    sleep(1);
+                    $result = $see->send($note);
+                    if (!$result->isSuccess()) {
+                        $err = $result->getError();
+                        $errCode = (string) ($err ? $err->getCode() : '');
+                        $errMsg = (string) ($err ? $err->getMessage() : '');
+                    }
+                }
+
+                if (!$result->isSuccess()) {
+                    if ((str_contains($errCode, '1033') || str_contains($errMsg, 'ya fue registrado')) && $esReintento) {
+                        return ['success' => true, 'already_registered' => true, 'note_name' => $note->getName()];
+                    }
+
+                    $codeNum = (int) $errCode;
+                    $isRejection = ($codeNum >= 2000 && $codeNum <= 3999) || str_contains($errCode, '1032');
+
+                    return [
+                        'error' => 'SUNAT rechazó la nota de crédito: ' . $errMsg,
+                        'rejected_by_sunat' => $isRejection,
+                        'code' => $errCode,
+                    ];
+                }
+            }
+
+            if ($cdrZip = $result->getCdrZip()) {
+                file_put_contents(storage_path("app/sunat/cdrs/R-{$note->getName()}.zip"), $cdrZip);
+            }
+
+            $cdrResponse = $result->getCdrResponse();
+            if ($cdrResponse && !$cdrResponse->isAccepted()) {
+                return [
+                    'error' => "SUNAT rechazó la nota de crédito (Código: {$cdrResponse->getCode()}): {$cdrResponse->getDescription()}",
+                    'rejected_by_sunat' => true,
+                    'code' => $cdrResponse->getCode(),
+                ];
+            }
+
+            return ['success' => true, 'note_name' => $note->getName()];
+        } catch (\Throwable $e) {
+            return ['error' => 'Error en el certificado o conexión: ' . $e->getMessage()];
+        }
+    }
+
+    /** Arma (sin enviar) la nota de crédito parcial de una devolución. */
+    public function buildNotaCreditoParcial(\App\Models\SaleReturn $return, \App\Models\Sale $venta, ?\App\Models\Branch $branch, string $serieNC, int $correlativoNC): \Greenter\Model\Sale\Note
+    {
+        $serieOriginal = trim($venta->serie);
+        $tipoDocOriginal = str_starts_with($serieOriginal, 'F') ? '01' : '03';
+
+        $total = round((float) $return->total, 2);
+        $base = round($total / 1.18, 2);
+        $igvTotal = round($total - $base, 2);
+
+        $cliente = (new \Greenter\Model\Client\Client())
+            ->setTipoDoc($venta->customer?->document_type ?? '1')
+            ->setNumDoc($venta->customer?->document_number ?? '00000000')
+            ->setRznSocial($venta->customer?->name ?? 'CLIENTE GENERICO');
+
+        $note = (new \Greenter\Model\Sale\Note())
+            ->setUblVersion('2.1')
+            ->setTipDocAfectado($tipoDocOriginal)
+            ->setNumDocfectado($serieOriginal . '-' . str_pad($venta->correlative, 8, '0', STR_PAD_LEFT))
+            ->setCodMotivo('07')
+            ->setDesMotivo(mb_substr('DEVOLUCION POR ITEM - ' . mb_strtoupper($return->reason), 0, 250))
+            ->setTipoDoc('07')
+            ->setSerie($serieNC)
+            ->setCorrelativo(str_pad($correlativoNC, 8, '0', STR_PAD_LEFT))
+            ->setFechaEmision(new \DateTime())
+            ->setTipoMoneda('PEN')
+            ->setCompany($this->getCompany($branch))
+            ->setClient($cliente)
+            ->setMtoOperGravadas($base)
+            ->setMtoIGV($igvTotal)
+            ->setTotalImpuestos($igvTotal)
+            ->setMtoImpVenta($total);
+
+        $details = [];
+        foreach ($return->items as $item) {
+            $precioUnitario = $item->quantity > 0 ? ((float) $item->total / $item->quantity) : 0;
+            $igvItem = (float) $item->total - ((float) $item->total / 1.18);
+
+            $details[] = (new \Greenter\Model\Sale\SaleDetail())
+                ->setCodProducto('P' . $item->product_variant_id)
+                ->setUnidad('NIU')
+                ->setCantidad($item->quantity)
+                ->setDescripcion($item->product_name)
+                ->setMtoBaseIgv(round($item->total / 1.18, 2))
+                ->setPorcentajeIgv(18.00)
+                ->setIgv(round($igvItem, 2))
+                ->setTipAfeIgv('10')
+                ->setTotalImpuestos(round($igvItem, 2))
+                ->setMtoValorVenta(round($item->total / 1.18, 2))
+                ->setMtoValorUnitario(round($precioUnitario / 1.18, 2))
+                ->setMtoPrecioUnitario(round($precioUnitario, 2));
+        }
+
+        $note->setDetails($details)
+            ->setLegends([(new \Greenter\Model\Sale\Legend())->setCode('1000')->setValue('SON: ' . number_format($total, 2, '.', '') . ' SOLES')]);
+
+
+        return $note;
+    }
+
     public function emitirNotaDebito($venta, $codigoMotivo, $descripcionMotivo, float $monto = 0.0, ?string $concepto = null)
     {
         try {
