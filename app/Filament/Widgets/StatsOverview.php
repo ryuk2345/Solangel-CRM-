@@ -19,12 +19,12 @@ class StatsOverview extends BaseWidget
 
     public static function canView(): bool
     {
-        return auth()->user()->hasRole('super_admin') || auth()->user()->can('widget_StatsOverview');
+        return auth()->user()->seesAllBranches() || auth()->user()->can('widget_StatsOverview');
     }
     protected function getStats(): array
     {
         $user = auth()->user();
-        $isSuperAdmin = $user?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = $user?->seesAllBranches() ?? false;
         $branchId = $user?->branch_id ?? 1;
 
         // Cálculos financieros con filtro por tienda si no es super_admin

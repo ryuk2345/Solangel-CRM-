@@ -30,7 +30,7 @@ class CashRegisterResource extends Resource
         $query = parent::getEloquentQuery()->with(['user', 'branch']);
         $user = \Illuminate\Support\Facades\Auth::user();
 
-        if (!$user->hasRole('super_admin')) {
+        if (!$user->seesAllBranches()) {
             if ($user->can('view_any_cash_register')) {
                 $query->where('branch_id', $user->branch_id ?? 1);
             } else {
@@ -143,7 +143,7 @@ class CashRegisterResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\SelectFilter::make('status')
                     ->label('Estado')
@@ -377,7 +377,7 @@ class CashRegisterResource extends Resource
                         }
                         $user = Auth::user();
                         if (!$user) return false;
-                        return $user->id === $record->user_id || $user->hasRole('super_admin');
+                        return $user->id === $record->user_id || $user->seesAllBranches();
                     })
                     ->form([
                         Forms\Components\Placeholder::make('info_diferencia')
@@ -501,18 +501,18 @@ class CashRegisterResource extends Resource
                         Forms\Components\Select::make('branch_id')
                             ->label('¿En qué Sucursal estás abriendo la caja?')
                             ->options(function () {
-                                if (Auth::user()->hasRole('super_admin')) {
+                                if (Auth::user()->seesAllBranches()) {
                                     return \App\Models\Branch::where('is_active', true)->pluck('name', 'id');
                                 }
                                 return \App\Models\Branch::where('id', Auth::user()->branch_id ?? 1)->pluck('name', 'id');
                             })
                             ->required()
                             ->default(fn () => Auth::user()->branch_id ?? 1)
-                            ->disabled(fn () => !Auth::user()->hasRole('super_admin'))
+                            ->disabled(fn () => !Auth::user()->seesAllBranches())
                             ->dehydrated()
                             ->live()
                             ->helperText(function (Forms\Get $get) {
-                                if (!Auth::user()?->hasRole('super_admin')) {
+                                if (!Auth::user()?->seesAllBranches()) {
                                     return null;
                                 }
                                 $branchId = $get('branch_id');
@@ -534,7 +534,7 @@ class CashRegisterResource extends Resource
                             ->rules([
                                 function () {
                                     return function (string $attribute, $value, \Closure $fail) {
-                                        if (!Auth::user()?->hasRole('super_admin')) {
+                                        if (!Auth::user()?->seesAllBranches()) {
                                             return;
                                         }
                                         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
@@ -562,7 +562,7 @@ class CashRegisterResource extends Resource
                     ->action(function (array $data): void {
                         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
 
-                        if (Auth::user()?->hasRole('super_admin')) {
+                        if (Auth::user()?->seesAllBranches()) {
                             $cajaExistente = CashRegister::where('branch_id', $data['branch_id'])
                                 ->where('status', 'abierta')
                                 ->where('opened_at', '>=', $hoyLima)

@@ -24,7 +24,7 @@ class SaleAnulacionService
     public static function anularVenta(Sale $sale, array $data, User $user): array
     {
         // 1. Control estricto de sucursal para cajeros (vendedor)
-        if (!$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$sale->branch_id) {
+        if (!$user->seesAllBranches() && (int)$user->branch_id !== (int)$sale->branch_id) {
             return [
                 'error' => 'No tiene permiso para anular ventas de otra sucursal.'
             ];
@@ -134,7 +134,7 @@ class SaleAnulacionService
     public static function regularizarNotaCredito(Sale $sale, array $data, User $user): array
     {
         // 1. Control estricto de sucursal para cajeros (vendedor)
-        if (!$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$sale->branch_id) {
+        if (!$user->seesAllBranches() && (int)$user->branch_id !== (int)$sale->branch_id) {
             return [
                 'error' => 'No tiene permiso para regularizar ventas de otra sucursal.'
             ];

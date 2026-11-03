@@ -48,7 +48,7 @@ class StockTransferResource extends Resource
             ]);
 
         $user = auth()->user();
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $userBranchId = $user->branch_id ?? 1;
             $query->where(function (Builder $q) use ($userBranchId) {
                 $q->where('origin_branch_id', $userBranchId)
@@ -61,7 +61,7 @@ class StockTransferResource extends Resource
 
     public static function form(Form $form): Form
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
         $userBranchId = auth()->user()?->branch_id ?? 1;
 
         return $form
@@ -270,7 +270,7 @@ class StockTransferResource extends Resource
 
     public static function table(Table $table): Table
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $table
             ->columns([

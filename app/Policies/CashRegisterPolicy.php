@@ -11,12 +11,12 @@ class CashRegisterPolicy
     use HandlesAuthorization;
 
     /**
-     * Cualquier usuario autenticado puede ver la lista de cajas.
-     * En el resource filtramos para que cada vendedor solo vea la suya.
+     * Solo los roles con permiso de caja entran a la lista (vendedor, administrador, contador).
+     * En el resource se filtra para que cada vendedor vea solo la suya.
      */
     public function viewAny(User $user): bool
     {
-        return true; // Todos los usuarios autenticados pueden entrar a la página de cajas
+        return $user->can('view_any_cash::register');
     }
 
     /**
@@ -24,58 +24,58 @@ class CashRegisterPolicy
      */
     public function view(User $user, CashRegister $cashRegister): bool
     {
-        return $cashRegister->user_id === $user->id || $user->can('view_cash_register');
+        return $cashRegister->user_id === $user->id || $user->can('view_cash::register');
     }
 
     public function create(User $user): bool
     {
-        return true; // Todos pueden abrir su propia caja
+        return $user->can('create_cash::register'); // vendedor y administrador abren su propia caja
     }
 
     public function update(User $user, CashRegister $cashRegister): bool
     {
         // Puede actualizar (cerrar) su propia caja, o si tiene permiso de admin
-        return $cashRegister->user_id === $user->id || $user->can('update_cash_register');
+        return $cashRegister->user_id === $user->id || $user->can('update_cash::register');
     }
 
     public function delete(User $user, CashRegister $cashRegister): bool
     {
-        return $user->can('delete_cash_register');
+        return $user->can('delete_cash::register');
     }
 
     public function deleteAny(User $user): bool
     {
-        return $user->can('delete_any_cash_register');
+        return $user->can('delete_any_cash::register');
     }
 
     public function forceDelete(User $user, CashRegister $cashRegister): bool
     {
-        return $user->can('force_delete_cash_register');
+        return $user->can('force_delete_cash::register');
     }
 
     public function forceDeleteAny(User $user): bool
     {
-        return $user->can('force_delete_any_cash_register');
+        return $user->can('force_delete_any_cash::register');
     }
 
     public function restore(User $user, CashRegister $cashRegister): bool
     {
-        return $user->can('restore_cash_register');
+        return $user->can('restore_cash::register');
     }
 
     public function restoreAny(User $user): bool
     {
-        return $user->can('restore_any_cash_register');
+        return $user->can('restore_any_cash::register');
     }
 
     public function replicate(User $user, CashRegister $cashRegister): bool
     {
-        return $user->can('replicate_cash_register');
+        return $user->can('replicate_cash::register');
     }
 
     public function reorder(User $user): bool
     {
-        return $user->can('reorder_cash_register');
+        return $user->can('reorder_cash::register');
     }
 }
 

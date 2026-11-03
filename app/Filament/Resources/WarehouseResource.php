@@ -23,7 +23,7 @@ class WarehouseResource extends Resource
 
     public static function form(Form $form): Form
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $form
             ->schema([
@@ -93,7 +93,7 @@ class WarehouseResource extends Resource
                 Tables\Filters\SelectFilter::make('branch_id')
                     ->relationship('branch', 'name')
                     ->label('Sucursal')
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\TernaryFilter::make('is_active')
                     ->label('Estado')
@@ -112,7 +112,7 @@ class WarehouseResource extends Resource
         $query = parent::getEloquentQuery()->with('branch');
 
         // Los usuarios no super_admin solo ven los almacenes de su tienda asignada
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId);
         }

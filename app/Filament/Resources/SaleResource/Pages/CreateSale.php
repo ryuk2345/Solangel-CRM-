@@ -24,7 +24,7 @@ class CreateSale extends CreateRecord
         $user = Auth::user();
         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
 
-        if ($user && $user->hasRole('super_admin')) {
+        if ($user && $user->seesAllBranches()) {
             $hayCajasHoy = CashRegister::where('status', 'abierta')
                 ->where('opened_at', '>=', $hoyLima)
                 ->exists();
@@ -185,7 +185,7 @@ class CreateSale extends CreateRecord
         $user = Auth::user();
         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
 
-        if ($user && $user->hasRole('super_admin')) {
+        if ($user && $user->seesAllBranches()) {
             $cajaAbierta = CashRegister::getActiveForSuperAdmin($data['branch_id']);
 
             if (!$cajaAbierta) {

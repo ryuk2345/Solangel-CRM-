@@ -23,7 +23,7 @@ class CreateStockTransfer extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $user = auth()->user();
-        if (!$user->hasRole('super_admin')) {
+        if (!$user->seesAllBranches()) {
             $data['origin_branch_id'] = $user->branch_id ?? 1;
         }
 

@@ -23,7 +23,7 @@ class UserResource extends Resource
 
     public static function form(Form $form): Form
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $form
             ->schema([
@@ -59,8 +59,12 @@ class UserResource extends Resource
                     ->searchable(),
 
                 Forms\Components\Select::make('roles')
-                    ->label('¿Qué permisos tendrá? (Rol)')
-                    ->relationship('roles', 'name')
+                    ->label('Rol')
+                    ->helperText('Administrador, vendedor, almacenero o contador.')
+                    // super_admin es el rol técnico del proveedor: solo otro super_admin puede asignarlo
+                    ->relationship('roles', 'name', fn (Builder $query) => auth()->user()?->hasRole('super_admin')
+                        ? $query
+                        : $query->where('name', '!=', 'super_admin'))
                     ->multiple()
                     ->preload()
                     ->searchable()
@@ -70,7 +74,7 @@ class UserResource extends Resource
 
     public static function table(Table $table): Table
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $table
             ->columns([
@@ -122,8 +126,13 @@ class UserResource extends Resource
     {
         $query = parent::getEloquentQuery()->with(['branch', 'roles']);
 
-        // Los usuarios no super_admin solo ven los usuarios de su propia tienda
+        // El usuario técnico super_admin no se muestra al cliente
         if (!auth()->user()?->hasRole('super_admin')) {
+            $query->whereDoesntHave('roles', fn ($r) => $r->where('name', 'super_admin'));
+        }
+
+        // Solo el administrador ve los usuarios de todas las tiendas
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId);
         }

@@ -86,12 +86,12 @@ class ProductResource extends Resource
                             ->searchable()
                             ->default(function () {
                                 $user = auth()->user();
-                                if ($user && !$user->hasRole('super_admin')) {
+                                if ($user && !$user->seesAllBranches()) {
                                     return [$user->branch_id ?? 1];
                                 }
                                 return [1];
                             })
-                            ->visible(fn () => auth()->user()?->hasRole('super_admin'))
+                            ->visible(fn () => auth()->user()?->seesAllBranches())
                             ->helperText('Selecciona las tiendas donde estará disponible este producto.')
                             ->columnSpanFull(),
                     ])->columns(2),
@@ -188,7 +188,7 @@ class ProductResource extends Resource
                     ->label('Tiendas')
                     ->badge()
                     ->color('info')
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin')),
+                    ->visible(fn () => auth()->user()?->seesAllBranches()),
 
                 Tables\Columns\IconColumn::make('is_web_visible')
                     ->label('Web')
@@ -206,7 +206,7 @@ class ProductResource extends Resource
                     ->label('Sucursal / Tienda')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin')),
+                    ->visible(fn () => auth()->user()?->seesAllBranches()),
 
                 Tables\Filters\TernaryFilter::make('is_web_visible')
                     ->label('Estado en la Web')
@@ -220,7 +220,7 @@ class ProductResource extends Resource
                     ->visible(function (Product $record) {
                         $user = auth()->user();
                         if (!$user) return false;
-                        if ($user->hasRole('super_admin')) return true;
+                        if ($user->seesAllBranches()) return true;
                         $branchIds = $record->branches->pluck('id');
                         return $branchIds->count() === 1 && $branchIds->contains($user->branch_id ?? 1);
                     }),
@@ -228,7 +228,7 @@ class ProductResource extends Resource
                     ->visible(function (Product $record) {
                         $user = auth()->user();
                         if (!$user) return false;
-                        if ($user->hasRole('super_admin')) return true;
+                        if ($user->seesAllBranches()) return true;
                         $branchIds = $record->branches->pluck('id');
                         return $branchIds->count() === 1 && $branchIds->contains($user->branch_id ?? 1);
                     }),
@@ -243,7 +243,7 @@ class ProductResource extends Resource
     {
         $query = parent::getEloquentQuery()->with(['variants', 'branches'])->where('is_service', false);
         $user = auth()->user();
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $branchId = $user->branch_id ?? 1;
             $query->whereHas('branches', fn($q) => $q->where('branches.id', $branchId));
         }

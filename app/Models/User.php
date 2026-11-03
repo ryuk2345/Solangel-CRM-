@@ -69,6 +69,18 @@ class User extends Authenticatable implements FilamentUser
     {
         return $this->hasRole('super_admin');
     }
+
+    /** Rol de negocio con acceso total (decisión 1 del cliente: opera todas las tiendas). */
+    public function isAdministrator(): bool
+    {
+        return $this->hasAnyRole(['super_admin', 'administrador']);
+    }
+
+    /** Administrador y super_admin ven y operan todas las tiendas; el resto, solo la suya. */
+    public function seesAllBranches(): bool
+    {
+        return $this->isAdministrator();
+    }
     
     public function canAccessPanel(Panel $panel): bool
     {

@@ -26,7 +26,7 @@ class Product extends Model
 
             // Regla: Si el producto es compartido (más de una tienda), solo super_admin puede eliminarlo
             $branchesCount = $product->branches()->count();
-            if ($branchesCount > 1 && $user && !$user->hasRole('super_admin')) {
+            if ($branchesCount > 1 && $user && !$user->seesAllBranches()) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
                     'id' => "El producto '{$product->name}' está compartido entre varias tiendas. Solo un super_admin puede eliminarlo.",
                 ]);

@@ -15,7 +15,7 @@ class LatestSalesWidget extends BaseWidget
 
     public static function canView(): bool
     {
-        return auth()->user()->hasRole('super_admin') || auth()->user()->can('widget_LatestSalesWidget');
+        return auth()->user()->seesAllBranches() || auth()->user()->can('widget_LatestSalesWidget');
     }
     // Título de la tabla
     protected static ?string $heading = 'Últimas 5 Ventas en Vivo 🔴';
@@ -26,7 +26,7 @@ class LatestSalesWidget extends BaseWidget
     public function table(Table $table): Table
     {
         $user = auth()->user();
-        $isSuperAdmin = $user?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = $user?->seesAllBranches() ?? false;
         $branchId = $user?->branch_id ?? 1;
 
         $query = Sale::query()->with('branch')->latest()->limit(5);

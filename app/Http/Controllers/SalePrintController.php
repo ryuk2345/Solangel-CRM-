@@ -363,7 +363,7 @@ class SalePrintController extends Controller
     private function validarAccesoSucursal(Sale $sale): void
     {
         $user = auth()->user();
-        if ($user && !$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$sale->branch_id) {
+        if ($user && !$user->seesAllBranches() && (int)$user->branch_id !== (int)$sale->branch_id) {
             abort(403, 'No tiene permiso para acceder a comprobantes de otra sucursal.');
         }
     }

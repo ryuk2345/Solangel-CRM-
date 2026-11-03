@@ -32,7 +32,7 @@ class EditStockTransfer extends EditRecord
             return;
         }
 
-        if (!$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$transfer->destination_branch_id) {
+        if (!$user->seesAllBranches() && (int)$user->branch_id !== (int)$transfer->destination_branch_id) {
             Notification::make()
                 ->title('Acceso no autorizado')
                 ->body('Solo el personal de la tienda de destino puede recibir este traspaso.')

@@ -21,7 +21,7 @@ class ViewStockTransfer extends ViewRecord
                 ->label('Recibir Traspaso')
                 ->icon('heroicon-o-inbox-arrow-down')
                 ->color('success')
-                ->visible(fn ($record) => $record->status === 'en_transito' && (auth()->user()?->hasRole('super_admin') || (int)auth()->user()?->branch_id === (int)$record->destination_branch_id))
+                ->visible(fn ($record) => $record->status === 'en_transito' && (auth()->user()?->seesAllBranches() || (int)auth()->user()?->branch_id === (int)$record->destination_branch_id))
                 ->form(function ($record) {
                     $fields = [];
                     foreach ($record->items as $item) {
@@ -136,7 +136,7 @@ class ViewStockTransfer extends ViewRecord
                     }
                     return $desc;
                 })
-                ->visible(fn ($record) => auth()->user()?->hasRole('super_admin') && $record->status === 'en_transito')
+                ->visible(fn ($record) => auth()->user()?->seesAllBranches() && $record->status === 'en_transito')
                 ->form([
                     Forms\Components\Textarea::make('cancellation_reason')
                         ->label('Motivo de la Anulación')

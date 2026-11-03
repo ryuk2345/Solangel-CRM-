@@ -37,7 +37,7 @@ class SaleReemissionService
     public function reemitirOReintentar(Sale $sale, User $user): array
     {
         // 1. Control de permisos (solo super_admin)
-        if (!$user->hasRole('super_admin')) {
+        if (!$user->seesAllBranches()) {
             return [
                 'success' => false,
                 'error'   => 'Solo los usuarios super_admin tienen permiso para reemitir comprobantes.',

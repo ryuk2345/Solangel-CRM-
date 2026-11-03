@@ -31,7 +31,7 @@ class ListSales extends ListRecords
     // 🌟 ESTA ES LA MAGIA DE LAS PESTAÑAS 🌟
     public function getTabs(): array
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin');
+        $isSuperAdmin = auth()->user()?->seesAllBranches();
         $userBranchId = auth()->user()?->branch_id ?? 1;
 
         $countQuery = fn (string $prefix) => \App\Models\Sale::where('serie', 'like', $prefix)

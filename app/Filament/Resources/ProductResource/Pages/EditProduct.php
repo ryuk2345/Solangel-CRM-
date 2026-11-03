@@ -19,7 +19,7 @@ class EditProduct extends EditRecord
         parent::mount($record);
 
         $user = Auth::user();
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $branchIds = $this->record->branches->pluck('id');
             if ($branchIds->count() > 1) {
                 abort(403, 'Este producto está compartido entre varias tiendas. Solo un administrador (super_admin) puede editarlo.');
@@ -33,7 +33,7 @@ class EditProduct extends EditRecord
     protected function beforeSave(): void
     {
         $user = Auth::user();
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             return;
         }
 
@@ -113,7 +113,7 @@ class EditProduct extends EditRecord
                 ->visible(function () {
                     $user = Auth::user();
                     if (!$user) return false;
-                    if ($user->hasRole('super_admin')) return true;
+                    if ($user->seesAllBranches()) return true;
                     $branchIds = $this->record->branches->pluck('id');
                     return $branchIds->count() === 1 && $branchIds->contains($user->branch_id ?? 1);
                 }),

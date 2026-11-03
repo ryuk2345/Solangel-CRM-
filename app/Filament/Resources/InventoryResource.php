@@ -24,7 +24,7 @@ class InventoryResource extends Resource
 
     public static function form(Form $form): Form
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $form
             ->schema([
@@ -91,7 +91,7 @@ class InventoryResource extends Resource
 
     public static function table(Table $table): Table
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $table
             ->columns([
@@ -145,7 +145,7 @@ class InventoryResource extends Resource
 
                 Tables\Filters\SelectFilter::make('warehouse_id')
                     ->relationship('warehouse', 'name', function (Builder $query) {
-                        if (!auth()->user()?->hasRole('super_admin')) {
+                        if (!auth()->user()?->seesAllBranches()) {
                             $query->where('branch_id', auth()->user()?->branch_id ?? 1);
                         }
                         return $query->where('is_active', true);
@@ -171,7 +171,7 @@ class InventoryResource extends Resource
             });
 
         // Los usuarios que no son super_admin solo ven el inventario de su propia tienda
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId)
                   ->whereHas('productVariant.product.branches', fn($q) => $q->where('branches.id', $userBranchId));

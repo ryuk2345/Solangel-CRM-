@@ -16,7 +16,7 @@ class ListAuditSales extends ListRecords
 
     public function getTabs(): array
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin');
+        $isSuperAdmin = auth()->user()?->seesAllBranches();
         $userBranchId = auth()->user()?->branch_id ?? 1;
 
         $countQuery = fn (\Closure $callback) => \App\Models\Sale::query()

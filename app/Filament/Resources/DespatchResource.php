@@ -84,7 +84,7 @@ class DespatchResource extends Resource
                             ->relationship('branch', 'name')
                             ->required()
                             ->default(fn () => auth()->user()?->branch_id ?? 1)
-                            ->disabled(fn () => !auth()->user()?->hasRole('super_admin'))
+                            ->disabled(fn () => !auth()->user()?->seesAllBranches())
                             ->dehydrated()
                             ->live()
                             ->rules(fn (Forms\Get $get): array => [
@@ -382,7 +382,7 @@ class DespatchResource extends Resource
                     ->badge()
                     ->color('info')
                     ->sortable()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('branch_id')
@@ -390,7 +390,7 @@ class DespatchResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\SelectFilter::make('sunat_status')
                     ->label('Estado SUNAT')
@@ -515,7 +515,7 @@ class DespatchResource extends Resource
     {
         $query = parent::getEloquentQuery()->with(['branch', 'customer', 'sale']);
 
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId);
         }

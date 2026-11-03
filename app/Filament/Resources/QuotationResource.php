@@ -26,25 +26,6 @@ class QuotationResource extends Resource
     protected static ?string $modelLabel = 'Cotización';
     protected static ?string $pluralModelLabel = 'Cotizaciones';
 
-    public static function canViewAny(): bool
-    {
-        return true;
-    }
-
-    public static function canCreate(): bool
-    {
-        return true;
-    }
-
-    public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
-    {
-        return true;
-    }
-
-    public static function canDelete(\Illuminate\Database\Eloquent\Model $record): bool
-    {
-        return true;
-    }
 
     public static function form(Form $form): Form
     {
@@ -113,7 +94,7 @@ class QuotationResource extends Resource
                                     ->relationship('branch', 'name')
                                     ->required()
                                     ->default(fn () => auth()->user()?->branch_id ?? 1)
-                                    ->disabled(fn () => !auth()->user()?->hasRole('super_admin'))
+                                    ->disabled(fn () => !auth()->user()?->seesAllBranches())
                                     ->dehydrated()
                                     ->live()
                                     ->prefixIcon('heroicon-m-building-storefront')
@@ -383,7 +364,7 @@ class QuotationResource extends Resource
                     ->badge()
                     ->color('info')
                     ->sortable()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Columns\TextColumn::make('total')
                     ->label('Total')
@@ -398,7 +379,7 @@ class QuotationResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\SelectFilter::make('status')
                     ->label('Estado')
@@ -502,7 +483,7 @@ class QuotationResource extends Resource
                         $user = Auth::user();
                         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
 
-                        if ($user && $user->hasRole('super_admin')) {
+                        if ($user && $user->seesAllBranches()) {
                             $cajaAbierta = \App\Models\CashRegister::getActiveForSuperAdmin($record->branch_id);
 
                             if (!$cajaAbierta) {
@@ -747,7 +728,7 @@ class QuotationResource extends Resource
     {
         $query = parent::getEloquentQuery()->with(['branch', 'user', 'customer']);
 
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId);
         }

@@ -154,7 +154,7 @@ class SaleResource extends Resource
                                         modifyQueryUsing: function ($query, string $operation) {
                                             if ($operation === 'create') {
                                                 $user = Auth::user();
-                                                if ($user && $user->hasRole('super_admin')) {
+                                                if ($user && $user->seesAllBranches()) {
                                                     $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
                                                     return $query->whereHas('cashRegisters', function ($q) use ($hoyLima) {
                                                         $q->where('status', 'abierta')
@@ -170,7 +170,7 @@ class SaleResource extends Resource
                                     ->prefixIcon('heroicon-m-building-storefront')
                                     ->default(function () {
                                         $user = Auth::user();
-                                        if ($user && $user->hasRole('super_admin')) {
+                                        if ($user && $user->seesAllBranches()) {
                                             $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
                                             if ($user->branch_id && \App\Models\CashRegister::where('branch_id', $user->branch_id)->where('status', 'abierta')->where('opened_at', '>=', $hoyLima)->exists()) {
                                                 return $user->branch_id;
@@ -179,7 +179,7 @@ class SaleResource extends Resource
                                         }
                                         return Auth::user()?->branch_id;
                                     })
-                                    ->disabled(fn () => !Auth::user()?->hasRole('super_admin'))
+                                    ->disabled(fn () => !Auth::user()?->seesAllBranches())
                                     ->dehydrated()
                                     ->afterStateUpdated(function (Set $set, $state) {
                                         $set('serie', null);
@@ -208,7 +208,7 @@ class SaleResource extends Resource
                                     ->live()
                                     ->prefixIcon('heroicon-m-home-modern')
                                     ->helperText('Almacén que descuenta stock')
-                                    ->disabled(fn () => !Auth::user()?->hasRole('super_admin'))
+                                    ->disabled(fn () => !Auth::user()?->seesAllBranches())
                                     ->dehydrated()
                                     ->afterStateUpdated(function (Set $set) {
                                         $set('items', []);
@@ -865,7 +865,7 @@ class SaleResource extends Resource
                     ->color('info')
                     ->sortable()
                     ->searchable()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Columns\TextColumn::make('warehouse.name')
                     ->label('Almacén')
@@ -882,11 +882,11 @@ class SaleResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\SelectFilter::make('warehouse_id')
                     ->relationship('warehouse', 'name', function (\Illuminate\Database\Eloquent\Builder $query) {
-                        if (!auth()->user()?->hasRole('super_admin')) {
+                        if (!auth()->user()?->seesAllBranches()) {
                             $query->where('branch_id', auth()->user()?->branch_id ?? 1);
                         }
                         return $query->where('is_active', true);
@@ -1401,7 +1401,7 @@ class SaleResource extends Resource
                         )
                         ->modalSubmitActionLabel('Confirmar y Procesar')
                         ->visible(fn (Sale $record) =>
-                            auth()->user()?->hasRole('super_admin') &&
+                            auth()->user()?->seesAllBranches() &&
                             !str_starts_with($record->serie, 'NV') &&
                             in_array($record->sunat_status, ['rechazado', 'pendiente']) &&
                             (!$record->is_quick_sale || $record->is_audited)
@@ -1687,7 +1687,7 @@ class SaleResource extends Resource
                         ->modalHeading('Reemisión y Reintento Masivo a SUNAT')
                         ->modalDescription('Se procesarán los comprobantes seleccionados que estén pendientes o rechazados. Los pendientes se reintentarán primero; si SUNAT los rechaza, se reemitirán con número nuevo. Los rechazados se reemitirán directamente con número nuevo y fecha de hoy. Stock y caja no se modificarán.')
                         ->modalSubmitActionLabel('Iniciar Procesamiento Masivo')
-                        ->visible(fn () => auth()->user()?->hasRole('super_admin'))
+                        ->visible(fn () => auth()->user()?->seesAllBranches())
                         ->action(function (\Illuminate\Database\Eloquent\Collection $records) {
                             $filtrados = $records->filter(fn (Sale $r) =>
                                 !str_starts_with($r->serie, 'NV') &&
@@ -1730,7 +1730,7 @@ class SaleResource extends Resource
         $query = parent::getEloquentQuery();
         $user = Auth::user();
 
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $query->where('branch_id', $user->branch_id ?? 1);
         }
 

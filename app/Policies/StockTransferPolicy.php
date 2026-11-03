@@ -17,7 +17,7 @@ class StockTransferPolicy
 
     public function view(User $user, StockTransfer $stockTransfer): bool
     {
-        if ($user->hasRole('super_admin')) {
+        if ($user->seesAllBranches()) {
             return true;
         }
 
@@ -41,7 +41,7 @@ class StockTransferPolicy
             return false;
         }
 
-        if ($user->hasRole('super_admin')) {
+        if ($user->seesAllBranches()) {
             return true;
         }
 

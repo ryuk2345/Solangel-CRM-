@@ -15,7 +15,7 @@ class CreateProduct extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $user = Auth::user();
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             // Un usuario que no es super_admin solo puede crear productos en su propia tienda
             $data['branches'] = [$user->branch_id ?? 1];
         }
@@ -28,7 +28,7 @@ class CreateProduct extends CreateRecord
         $user = Auth::user();
 
         // Si no es super_admin, asegurar vinculación con la tienda del usuario
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $userBranchId = $user->branch_id ?? 1;
             $product->branches()->syncWithoutDetaching([$userBranchId]);
         }

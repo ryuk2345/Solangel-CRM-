@@ -168,14 +168,14 @@ class BranchResource extends Resource
 
     public static function canCreate(): bool
     {
-        return auth()->user()?->hasRole('super_admin') ?? false;
+        return auth()->user()?->seesAllBranches() ?? false;
     }
 
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
 
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('id', $userBranchId);
         }

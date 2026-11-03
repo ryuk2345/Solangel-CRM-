@@ -14,12 +14,12 @@ class SalesChart extends ChartWidget
 
     public static function canView(): bool
     {
-        return auth()->user()->hasRole('super_admin') || auth()->user()->can('widget_SalesChart');
+        return auth()->user()->seesAllBranches() || auth()->user()->can('widget_SalesChart');
     }
     protected function getData(): array
     {
         $user = auth()->user();
-        $isSuperAdmin = $user?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = $user?->seesAllBranches() ?? false;
         $branchId = $user?->branch_id ?? 1;
 
         $data = [];
