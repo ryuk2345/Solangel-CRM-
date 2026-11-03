@@ -83,9 +83,10 @@ class SaleResource extends Resource
                         Forms\Components\Grid::make(12)
                             ->schema([
                                 Forms\Components\Toggle::make('is_quick_sale')
-                                    ->label('⚡ Venta Rápida / Genérica (Cargar descripción y total sin detallar repuestos)')
-                                    ->live()
-                                    ->dehydrated()
+                                    ->label('⚡ Venta rápida (función retirada; solo consulta de ventas antiguas)')
+                                    ->visible(fn (?Sale $record) => (bool) $record?->is_quick_sale)
+                                    ->disabled()
+                                    ->dehydrated(false)
                                     ->afterStateUpdated(function (Set $set) {
                                         $set('items', []);
                                     })
@@ -327,7 +328,7 @@ class SaleResource extends Resource
                 // ==========================================
                 // 2. DETALLE: PRODUCTOS Y SERVICIOS
                 // ==========================================
-                Forms\Components\Section::make('Detalle de Repuestos y Servicios')
+                Forms\Components\Section::make('Detalle de Prendas')
                     ->visible(fn(Get $get) => !$get('is_quick_sale'))
                     // 🌟 EL BOTÓN SE MUEVE AL ENCABEZADO DE LA SECCIÓN
                     ->headerActions([
@@ -393,14 +394,14 @@ class SaleResource extends Resource
                         Forms\Components\Repeater::make('items')
                             ->hiddenLabel() 
                             ->relationship('items')
-                            ->addActionLabel('➕ Agregar Repuesto')
+                            ->addActionLabel('➕ Agregar prenda')
                             ->hidden(fn(Get $get) => (bool)$get('is_quick_sale'))
                             ->defaultItems(1) 
                             ->schema([
                                 Forms\Components\Grid::make(12) 
                                     ->schema([
                                         Forms\Components\Select::make('product_variant_id')
-                                            ->label('Repuesto o Servicio')
+                                            ->label('Prenda (modelo / color / talla)')
                                             ->searchable()
                                             ->getSearchResultsUsing(function (string $search, Get $get) {
                                                 $branchId = $get('../../branch_id');
@@ -412,28 +413,7 @@ class SaleResource extends Resource
                                                         ?? \App\Models\Warehouse::where('branch_id', $branchId)->value('id');
                                                 }
 
-                                                // Asegurar el producto y variante comodín
-                                                $genericProduct = \App\Models\Product::firstOrCreate(
-                                                    ['name' => 'Repuesto Varios / Genérico'],
-                                                    [
-                                                        'is_service' => true,
-                                                        'sale_price' => 0,
-                                                        'is_web_visible' => false,
-                                                    ]
-                                                );
-                                                $genericVariant = \App\Models\ProductVariant::firstOrCreate(
-                                                    ['product_id' => $genericProduct->id],
-                                                    [
-                                                        'sku' => 'REPE-GENERICO',
-                                                        'color_name' => 'Único',
-                                                        'size' => 'Único',
-                                                        
-                                                    ]
-                                                );
-
-                                                $opciones = [
-                                                    $genericVariant->id => "⭐ [REPE-GENERICO] Repuesto Varios / Genérico (Editar nombre y precio)"
-                                                ];
+                                                $opciones = [];
 
                                                 $query = \App\Models\Inventory::with(['productVariant.product'])
                                                     ->whereHas('productVariant.product.branches', function ($b) use ($branchId) {
@@ -501,9 +481,6 @@ class SaleResource extends Resource
                                             ->getOptionLabelUsing(function ($value) {
                                                 $variant = \App\Models\ProductVariant::with(['product'])->find($value);
                                                 if (!$variant) return '';
-                                                if ($variant->sku === 'REPE-GENERICO') {
-                                                    return "⭐ [REPE-GENERICO] Repuesto Varios / Genérico";
-                                                }
                                                 if ($variant->product?->is_service) {
                                                     return "🔧 {$variant->product->name} (Servicio)";
                                                 }
@@ -550,7 +527,7 @@ class SaleResource extends Resource
 
                                                             if ($stock <= 0) {
                                                                 \Filament\Notifications\Notification::make()
-                                                                    ->title('⚠️ Repuesto sin Stock')
+                                                                    ->title('⚠️ Prenda sin stock')
                                                                     ->body('Este repuesto no cuenta con stock disponible en el almacén seleccionado. La venta procederá con stock negativo.')
                                                                     ->warning()
                                                                     ->send();
@@ -630,9 +607,9 @@ class SaleResource extends Resource
                                             ->columnSpan(2),
 
                                         Forms\Components\TextInput::make('product_name')
-                                            ->label('📝 Descripción del Repuesto / Servicio (Se imprimirá en el comprobante)')
+                                            ->label('📝 Descripción (se imprimirá en el comprobante)')
                                             ->required()
-                                            ->placeholder('Selecciona un repuesto arriba o escribe el nombre / placa aquí...')
+                                            ->placeholder('Se completa al elegir la prenda')
                                             ->columnSpan(12),
 
                                         Forms\Components\Hidden::make('is_generic')
@@ -648,7 +625,7 @@ class SaleResource extends Resource
                     ->visible(fn(Get $get) => (bool)$get('is_quick_sale'))
                     ->schema([
                         Forms\Components\TextInput::make('quick_sale_description')
-                            ->label('Descripción de la Venta (Ej: 30 Repuestos según lista física #102)')
+                            ->label('Descripción de la venta rápida')
                             ->required(fn(Get $get) => (bool)$get('is_quick_sale'))
                             ->placeholder('Detalle general de los productos vendidos...')
                             ->maxLength(255),
@@ -1461,13 +1438,13 @@ class SaleResource extends Resource
                                 ->content(fn() => 'S/ ' . number_format($record->total, 2)),
                             
                             Forms\Components\Repeater::make('audited_items')
-                                ->label('Repuestos Reales Vendidos')
+                                ->label('Prendas reales vendidas')
                                 ->required()
                                 ->minItems(1)
                                 ->schema([
                                     Forms\Components\Grid::make(12)->schema([
                                         Forms\Components\Select::make('product_variant_id')
-                                            ->label('Repuesto')
+                                            ->label('Prenda')
                                             ->searchable()
                                             ->getSearchResultsUsing(function (string $search) use ($record) {
                                                 $warehouseId = $record->warehouse_id ?? $record->branch?->defaultWarehouse?->id ?? 1;
@@ -1506,7 +1483,7 @@ class SaleResource extends Resource
                                     ])
                                 ])
                                 ->live()
-                                ->createItemButtonLabel('➕ Agregar Repuesto Real')
+                                ->createItemButtonLabel('➕ Agregar prenda')
                         ])
                         ->action(function (Sale $record, array $data) {
                             if (!$record->is_quick_sale || $record->is_audited) {
@@ -1595,7 +1572,7 @@ class SaleResource extends Resource
                                     $variant = \App\Models\ProductVariant::with('product')->find($item['product_variant_id']);
                                     $productName = !empty($item['product_name'])
                                         ? $item['product_name']
-                                        : (($variant && $variant->product) ? $variant->product->name : 'Repuesto');
+                                        : (($variant && $variant->product) ? $variant->product->name : 'Prenda');
                                     $qty = (int)($item['quantity'] ?? 1);
                                     $price = (float)($item['price'] ?? 0);
                                     $lineTotal = round($price * $qty, 2);

@@ -20,14 +20,14 @@ class ProductVariantResource extends Resource
     protected static ?string $navigationIcon = 'heroicon-o-swatch';
     protected static ?string $navigationGroup = '2. Catálogo e Inventario';
     protected static ?int $navigationSort = 4;
-    protected static ?string $modelLabel = 'Detalle de Repuesto';
-    protected static ?string $pluralModelLabel = 'Detalles de Repuestos';
+    protected static ?string $modelLabel = 'Variante';
+    protected static ?string $pluralModelLabel = 'Variantes';
 
     public static function form(Form $form): Form
     {
         return $form
             ->schema([
-                Forms\Components\Section::make('Detalles del Repuesto')
+                Forms\Components\Section::make('Datos de la variante')
                     ->schema([
                         Forms\Components\Select::make('product_id')
                             ->relationship('product', 'name')

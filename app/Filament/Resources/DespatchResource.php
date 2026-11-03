@@ -294,7 +294,7 @@ class DespatchResource extends Resource
                             ->relationship('items')
                             ->schema([
                                 Forms\Components\Select::make('product_variant_id')
-                                    ->label('Buscar Repuesto')
+                                    ->label('Buscar prenda')
                                     ->options(function (Forms\Get $get) {
                                         $branchId = $get('../../branch_id') ?? auth()->user()?->branch_id ?? 1;
                                         return ProductVariant::with('product')
@@ -314,7 +314,7 @@ class DespatchResource extends Resource
                                         }
                                     }),
                                 Forms\Components\TextInput::make('product_name')
-                                    ->label('Descripción del Repuesto')
+                                    ->label('Descripción de la prenda')
                                     ->required(),
                                 Forms\Components\TextInput::make('quantity')
                                     ->label('Cantidad')
@@ -503,7 +503,7 @@ class DespatchResource extends Resource
                         RepeatableEntry::make('items')
                             ->label('')
                             ->schema([
-                                TextEntry::make('product_name')->label('Repuesto'),
+                                TextEntry::make('product_name')->label('Prenda'),
                                 TextEntry::make('quantity')->label('Cantidad'),
                                 TextEntry::make('unit_code')->label('Unidad'),
                             ])->columns(3)

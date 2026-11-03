@@ -58,7 +58,7 @@
             <img src="{{ public_path('storage/' . $empresa->logo) }}" style="max-height: 100px; max-width: 240px; width: 85%; margin-bottom: 5px; object-fit: contain;">
         @endif
         
-        <div style="font-size: 13.5px; font-weight: bold; text-transform: uppercase; margin-top: 2px;">{{ $empresa->name ?? 'MANGUIPERU E.I.R.L.' }}</div>
+        <div style="font-size: 13.5px; font-weight: bold; text-transform: uppercase; margin-top: 2px;">{{ $empresa->name ?? env('EMPRESA_NOMBRE', '') }}</div>
         <div style="font-size: 12px; font-weight: bold; margin-top: 1px;">RUC {{ $empresa->ruc ?? '20550518016' }}</div>
         <div style="font-size: 10px; text-transform: uppercase; margin-top: 2px; line-height: 1.25;">
             {{ $sale->branch->address ?? $empresa->address_principal ?? 'AV.NICOLAS DE PIEROLA 1252 , VILLA MARÍA DEL TRIUNFO , LIMA - LIMA' }}

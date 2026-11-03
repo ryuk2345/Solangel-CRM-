@@ -154,7 +154,7 @@ class QuotationResource extends Resource
                             ]),
                     ]),
 
-                Forms\Components\Section::make('Detalle de Repuestos y Servicios')
+                Forms\Components\Section::make('Detalle de Prendas')
                     ->schema([
                         Forms\Components\Repeater::make('items')
                             ->hiddenLabel() 
@@ -165,7 +165,7 @@ class QuotationResource extends Resource
                                 Forms\Components\Grid::make(12) 
                                     ->schema([
                                         Forms\Components\Select::make('product_variant_id')
-                                            ->label('Repuesto o Servicio')
+                                            ->label('Prenda (modelo / color / talla) o delivery')
                                             ->searchable()
                                             ->getSearchResultsUsing(function (string $search, Get $get) {
                                                 $branchId = $get('../../branch_id');
@@ -286,9 +286,9 @@ class QuotationResource extends Resource
                                             ->columnSpan(2),
 
                                         Forms\Components\TextInput::make('product_name')
-                                            ->label('📝 Descripción del Repuesto / Servicio (Se imprimirá en la cotización)')
+                                            ->label('📝 Descripción (se imprimirá en la cotización)')
                                             ->required()
-                                            ->placeholder('Selecciona un repuesto arriba o escribe el nombre aquí...')
+                                            ->placeholder('Selecciona una prenda arriba...')
                                             ->columnSpan(12),
 
                                         Forms\Components\Hidden::make('igv'),

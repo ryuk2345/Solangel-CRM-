@@ -13,12 +13,6 @@ class ListProducts extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            Actions\Action::make('importar_csv')
-                ->label('Importar desde CSV/Excel')
-                ->color('success')
-                ->icon('heroicon-o-arrow-up-tray')
-                ->url(fn () => route('import.products.page')),
-
             Actions\CreateAction::make(),
         ];
     }

@@ -75,7 +75,7 @@ class ProductResource extends Resource
                             ->searchable(),
 
                         Forms\Components\Textarea::make('description')
-                            ->label('Descripción del repuesto')
+                            ->label('Descripción')
                             ->columnSpanFull(),
 
                         Forms\Components\Select::make('branches')
@@ -110,18 +110,9 @@ class ProductResource extends Resource
                             ->prefix('S/'),
 
                         Forms\Components\TextInput::make('material')
-                            ->label('Número de Parte (OEM)')
-                            ->placeholder('Ej: 12345-ABC-789')
+                            ->label('Material / composición')
+                            ->placeholder('Ej: 100% algodón pima')
                             ->maxLength(255),
-
-                        Forms\Components\TextInput::make('brand')
-                            ->label('Marca / Línea'),
-
-                        Forms\Components\TextInput::make('oem_code')
-                            ->label('Código OEM / Parte'),
-
-                        Forms\Components\TextInput::make('manufacturer')
-                            ->label('Fabricante'),
 
                         Forms\Components\TextInput::make('location')
                             ->label('Ubicación en Almacén')
@@ -130,11 +121,6 @@ class ProductResource extends Resource
                         Forms\Components\TextInput::make('badge')
                             ->label('Etiqueta (Ej: NUEVO, MÁS VENDIDO)')
                             ->maxLength(255),
-
-                        Forms\Components\Textarea::make('compatibility')
-                            ->label('Compatibilidad (Autos/Modelos)')
-                            ->columnSpanFull()
-                            ->placeholder('Ej: Toyota Yaris 2015-2022, Nissan Tiida...'),
 
                         Forms\Components\Toggle::make('is_web_visible')
                             ->label('¿Mostrar en la página web?')
@@ -187,27 +173,6 @@ class ProductResource extends Resource
                     ->label('Unidad')
                     ->badge()
                     ->color('success'),
-
-                Tables\Columns\TextColumn::make('oem_code')
-                    ->label('OEM / Código')
-                    ->state(function (Product $record) {
-                        $skus = $record->variants->pluck('sku')->filter()->toArray();
-                        if (empty($skus)) {
-                            return $record->oem_code;
-                        }
-                        return implode(', ', array_unique($skus));
-                    })
-                    ->searchable(query: function ($query, $search) {
-                        return $query->where('oem_code', 'like', "%{$search}%")
-                            ->orWhereHas('variants', function ($q) use ($search) {
-                                $q->where('sku', 'like', "%{$search}%");
-                            });
-                    })
-                    ->sortable(),
-
-                Tables\Columns\TextColumn::make('brand')
-                    ->label('Marca')
-                    ->searchable(),
 
                 Tables\Columns\TextColumn::make('sale_price')
                     ->label('Precio Venta')

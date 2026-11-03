@@ -67,7 +67,7 @@ class InventoryResource extends Resource
                                 return [$variant->id => ($variant->product?->name ?? 'Producto') . ' - Modelo: ' . $variant->size . $brandInfo];
                             });
                     })
-                    ->label('Repuesto Específico')
+                    ->label('Prenda (modelo / color / talla)')
                     ->required()
                     ->searchable()
                     ->unique(
@@ -77,7 +77,7 @@ class InventoryResource extends Resource
                         ignoreRecord: true
                     )
                     ->validationMessages([
-                        'unique' => '⚠️ Este repuesto ya está registrado en este almacén. Modifica su stock existente.',
+                        'unique' => '⚠️ Esta prenda ya está registrada en este almacén.',
                     ]),
 
                 Forms\Components\TextInput::make('stock')
@@ -113,7 +113,7 @@ class InventoryResource extends Resource
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('productVariant.sku')
-                    ->label('Código / OEM')
+                    ->label('SKU')
                     ->searchable()
                     ->sortable(),
 

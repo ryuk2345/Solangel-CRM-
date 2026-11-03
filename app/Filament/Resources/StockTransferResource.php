@@ -194,7 +194,7 @@ class StockTransferResource extends Resource
                                 Forms\Components\Grid::make(12)
                                     ->schema([
                                         Forms\Components\Select::make('product_variant_id')
-                                            ->label('Producto / Repuesto')
+                                            ->label('Prenda (modelo / color / talla)')
                                             ->required()
                                             ->searchable()
                                             ->getSearchResultsUsing(function (string $search, Get $get) {

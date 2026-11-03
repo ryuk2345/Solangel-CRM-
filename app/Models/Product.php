@@ -20,42 +20,6 @@ class Product extends Model
 
     protected static function booted()
     {
-        static::saved(function ($product) {
-            // Asegurar que exista al menos una variante para este producto
-            $sku = !empty($product->oem_code) ? trim($product->oem_code) : 'PROD-' . str_pad($product->id, 5, '0', STR_PAD_LEFT);
-            
-            // Si ya existen variantes para este producto, no pisamos ninguna
-            $hasVariants = \App\Models\ProductVariant::where('product_id', $product->id)->exists();
-            if ($hasVariants) {
-                // Solo actualizamos la variante que coincida con el SKU actual del producto
-                $defaultVariant = \App\Models\ProductVariant::where('product_id', $product->id)
-                    ->where('sku', $sku)
-                    ->first();
-                if ($defaultVariant) {
-                    $defaultVariant->update([
-                        'sale_price' => $product->sale_price,
-                        'purchase_price' => $product->purchase_price,
-                        'color_name' => !empty($product->brand) ? $product->brand : $defaultVariant->color_name,
-                    ]);
-                }
-                return;
-            }
-
-            // Si no tiene variantes, creamos la variante principal
-            $existingVariant = \App\Models\ProductVariant::where('sku', $sku)->first();
-            if ($existingVariant) {
-                $sku .= '-' . $product->id;
-            }
-
-            \App\Models\ProductVariant::create([
-                'product_id' => $product->id,
-                'sku' => $sku,
-                'size' => 'Único',
-                'color_name' => !empty($product->brand) ? $product->brand : 'Único',
-                'sale_price' => $product->sale_price,
-                'purchase_price' => $product->purchase_price,
-            ]);
-        });
         static::deleting(function ($product) {
             $user = auth()->user();
             $variantIds = $product->variants()->pluck('id');
