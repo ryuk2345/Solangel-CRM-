@@ -13,11 +13,14 @@ use Filament\Tables\Table;
 class CompanySettingResource extends Resource
 {
     protected static ?string $model = CompanySetting::class;
+    protected static ?string $cluster = \App\Filament\Clusters\CompanyAndSunat::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-cog-6-tooth';
-    protected static ?string $navigationGroup = '4. Configuración';
+    protected static ?string $navigationIcon = 'heroicon-o-building-office';
+    protected static ?string $navigationGroup = null;
     protected static ?int $navigationSort = 1;
-    protected static ?string $modelLabel = 'Configuración de Empresa';
+    protected static ?string $modelLabel = 'Empresa';
+    protected static ?string $pluralModelLabel = 'Empresa';
+    protected static ?string $navigationLabel = 'Empresa';
 
     // 🌟 ESTO ES CLAVE: Evita que aparezca en el menú si no es a través de getNavigationUrl
     public static function shouldRegisterNavigation(): bool

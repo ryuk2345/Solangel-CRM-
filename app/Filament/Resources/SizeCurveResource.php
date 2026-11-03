@@ -14,9 +14,10 @@ use Filament\Tables\Table;
 class SizeCurveResource extends Resource
 {
     protected static ?string $model = SizeCurve::class;
+    protected static ?string $cluster = \App\Filament\Clusters\Catalogs::class;
     protected static ?string $navigationIcon = 'heroicon-o-bars-3-bottom-left';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 22;
+    protected static ?string $navigationGroup = null;
+    protected static ?int $navigationSort = 3;
     protected static ?string $modelLabel = 'Curva de tallas';
     protected static ?string $pluralModelLabel = 'Curvas de tallas';
 

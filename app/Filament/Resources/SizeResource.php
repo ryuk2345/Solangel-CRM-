@@ -13,9 +13,10 @@ use Filament\Tables\Table;
 class SizeResource extends Resource
 {
     protected static ?string $model = Size::class;
+    protected static ?string $cluster = \App\Filament\Clusters\Catalogs::class;
     protected static ?string $navigationIcon = 'heroicon-o-arrows-pointing-out';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 21;
+    protected static ?string $navigationGroup = null;
+    protected static ?int $navigationSort = 2;
     protected static ?string $modelLabel = 'Talla';
     protected static ?string $pluralModelLabel = 'Tallas';
 

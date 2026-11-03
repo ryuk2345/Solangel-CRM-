@@ -14,12 +14,13 @@ use Illuminate\Database\Eloquent\Builder;
 class UserResource extends Resource
 {
     protected static ?string $model = User::class;
+    protected static ?string $cluster = \App\Filament\Clusters\UsersAndRoles::class;
 
     protected static ?string $modelLabel = 'Usuario';
     protected static ?string $pluralModelLabel = 'Usuarios del Sistema';
     protected static ?string $navigationIcon = 'heroicon-o-users';
-    protected static ?string $navigationGroup = '4. Configuración';
-    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = null;
+    protected static ?int $navigationSort = 1;
 
     public static function form(Form $form): Form
     {

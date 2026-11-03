@@ -13,9 +13,10 @@ use Filament\Tables\Table;
 class ColorResource extends Resource
 {
     protected static ?string $model = Color::class;
+    protected static ?string $cluster = \App\Filament\Clusters\Catalogs::class;
     protected static ?string $navigationIcon = 'heroicon-o-swatch';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 20;
+    protected static ?string $navigationGroup = null;
+    protected static ?int $navigationSort = 1;
     protected static ?string $modelLabel = 'Color';
     protected static ?string $pluralModelLabel = 'Colores';
 

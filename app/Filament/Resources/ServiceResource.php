@@ -14,11 +14,12 @@ use Illuminate\Database\Eloquent\Builder;
 class ServiceResource extends Resource
 {
     protected static ?string $model = \App\Models\Service::class;
+    protected static ?string $cluster = \App\Filament\Clusters\Catalogs::class;
     
     // 🌟 Icono de herramientas y menú separado
     protected static ?string $navigationIcon = 'heroicon-o-truck';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = null;
+    protected static ?int $navigationSort = 7;
     protected static ?string $modelLabel = 'Delivery';
     protected static ?string $pluralModelLabel = 'Delivery';
     protected static ?string $navigationLabel = 'Delivery';

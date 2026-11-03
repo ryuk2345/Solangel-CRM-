@@ -13,9 +13,10 @@ use Filament\Tables\Table;
 class SeasonResource extends Resource
 {
     protected static ?string $model = Season::class;
+    protected static ?string $cluster = \App\Filament\Clusters\Catalogs::class;
     protected static ?string $navigationIcon = 'heroicon-o-sun';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 23;
+    protected static ?string $navigationGroup = null;
+    protected static ?int $navigationSort = 4;
     protected static ?string $modelLabel = 'Temporada';
     protected static ?string $pluralModelLabel = 'Temporadas';
 

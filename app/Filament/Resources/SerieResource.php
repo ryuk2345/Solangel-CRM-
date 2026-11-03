@@ -13,11 +13,13 @@ use Filament\Tables\Table;
 class SerieResource extends Resource
 {
     protected static ?string $model = Serie::class;
+    protected static ?string $cluster = \App\Filament\Clusters\CompanyAndSunat::class;
 
     protected static ?string $modelLabel = 'Serie y Correlativo';
     protected static ?string $pluralModelLabel = 'Series de Comprobantes';
+    protected static ?string $navigationLabel = 'Series de Comprobantes';
     protected static ?string $navigationIcon = 'heroicon-o-ticket';
-    protected static ?string $navigationGroup = '4. Configuración';
+    protected static ?string $navigationGroup = null;
     protected static ?int $navigationSort = 2;
 
     public static function form(Form $form): Form

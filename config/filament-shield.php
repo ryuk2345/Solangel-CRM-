@@ -6,12 +6,12 @@ return [
         'slug' => 'shield/roles',
         'navigation_sort' => 4, // <-- Cambia el -1 por 4 para que vaya al final
         'navigation_badge' => true,
-        'navigation_group' => '4. Configuración', // <-- Cambia el true por el nombre de tu grupo
+        'navigation_group' => null,
         'sub_navigation_position' => null,
         'is_globally_searchable' => false,
         'show_model_path' => true,
         'is_scoped_to_tenant' => true,
-        'cluster' => null,
+        'cluster' => \App\Filament\Clusters\UsersAndRoles::class,
     ],
 
     'tenant_model' => null,
