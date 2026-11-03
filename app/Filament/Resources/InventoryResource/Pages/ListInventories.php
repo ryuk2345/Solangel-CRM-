@@ -10,7 +10,7 @@ class ListInventories extends ListRecords
 {
     protected static string $resource = InventoryResource::class;
 
-    public function getHeader(): ?\Illuminate\Contracts\Support\Htmlable
+    public function getHeader(): ?\Illuminate\Contracts\View\View
     {
         return view('filament.components.inventory-tabs', ['active' => 'list']);
     }
