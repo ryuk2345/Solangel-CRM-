@@ -1,7 +1,23 @@
 # PLAN_MODA — Rwarehouse Moda
 
 Plan para convertir la base heredada de Mangui (repuestos) en un sistema para una tienda de ropa minorista y mayorista.
-Estado: **aprobado con las decisiones del cliente (§8).** La implementación avanza por etapas, cada una en su propia rama.
+Estado: **implementado** en la rama `feat/etapa-0-instalacion` (Etapas 0 a 9, incluida la 8b de crédito). Cómo probarlo: `PROBAR_EN_LOCAL.md`.
+
+| Etapa | Estado |
+|---|---|
+| 0 Instalación desde cero | Hecha |
+| 1 Limpieza de repuestos | Hecha |
+| 2 Roles y permisos | Hecha |
+| 3 Catálogo de moda (colores, tallas, curvas, dos precios) | Hecha |
+| 4 Precio minorista/mayorista + aprobación con PIN | Hecha |
+| 5 Kardex, stock bajo, matriz | Hecha |
+| 6 Compras por curva y etiquetas | Hecha |
+| 7 Punto de venta (escáner y selector) | Hecha |
+| 8 Cambios de talla (nota de crédito parcial) | Hecha |
+| 8b Ventas a crédito | Hecha |
+| 9 Reportes | Hecha |
+
+Pendiente fuera de este entorno: probar la emisión real en SUNAT beta con el certificado de pruebas (boleta, factura a crédito y nota de crédito parcial).
 
 ---
 
