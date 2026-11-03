@@ -17,6 +17,8 @@ class Sale extends Model
         'is_quick_sale'      => 'boolean',
         'is_audited'         => 'boolean',
         'reemission_history' => 'array',
+        'due_date'           => 'date',
+        'credit_balance'     => 'decimal:2',
     ];
 
     protected static function booted()
@@ -80,6 +82,11 @@ class Sale extends Model
     {
         return $this->belongsTo(User::class, 'seller_id');
     }
+    public function customerPayments()
+    {
+        return $this->hasMany(CustomerPayment::class);
+    }
+
     public function returns()
     {
         return $this->hasMany(SaleReturn::class);

@@ -766,8 +766,30 @@ class SaleResource extends Resource
                     ->schema([
                         Forms\Components\Section::make('Cobro y Vuelto')
                             ->schema([
+                                // Venta a crédito: solo clientes mayoristas con crédito habilitado (decisión 8)
+                                Forms\Components\ToggleButtons::make('payment_condition')
+                                    ->label('Condición de pago')
+                                    ->options(['contado' => 'Contado', 'credito' => 'Crédito'])
+                                    ->icons(['contado' => 'heroicon-o-banknotes', 'credito' => 'heroicon-o-calendar-days'])
+                                    ->default('contado')
+                                    ->inline()
+                                    ->live()
+                                    ->visible(fn (Get $get, string $operation) => $operation === 'create'
+                                        && (bool) \App\Models\Customer::find($get('customer_id'))?->canBuyOnCredit())
+                                    ->helperText(function (Get $get) {
+                                        $c = \App\Models\Customer::find($get('customer_id'));
+                                        if (!$c || $get('payment_condition') !== 'credito') {
+                                            return null;
+                                        }
+                                        $limite = $c->credit_limit !== null ? 'límite S/ ' . number_format((float) $c->credit_limit, 2) : 'sin límite';
+
+                                        return 'Debe S/ ' . number_format($c->outstandingBalance(), 2) . " ({$limite}). Vence en {$c->credit_days} días. "
+                                            . 'Abajo registra solo el adelanto (puede ser 0). Usa factura o nota de venta.';
+                                    })
+                                    ->columnSpan(12),
+
                                 Forms\Components\Repeater::make('payments')
-                                    ->label('Desglose de Pagos')
+                                    ->label(fn (Get $get) => $get('payment_condition') === 'credito' ? 'Adelanto (opcional)' : 'Desglose de Pagos')
                                     ->relationship('payments')
                                     ->schema([
                                         Forms\Components\Select::make('payment_method')
@@ -921,6 +943,16 @@ class SaleResource extends Resource
                     ->label('Fecha')
                     ->dateTime('d/m/Y H:i')
                     ->sortable(),
+
+                Tables\Columns\TextColumn::make('credit_balance')
+                    ->label('Saldo por cobrar')
+                    ->money('PEN')
+                    ->alignment('right')
+                    ->badge()
+                    ->color(fn (Sale $record) => \App\Services\CreditService::isOverdue($record) ? 'danger' : 'warning')
+                    ->description(fn (Sale $record) => $record->due_date ? ('Vence ' . $record->due_date->format('d/m/Y')) : null)
+                    ->visible(fn () => Sale::where('credit_balance', '>', 0)->exists())
+                    ->formatStateUsing(fn ($state) => (float) $state > 0 ? 'S/ ' . number_format((float) $state, 2) : '—'),
 
                 Tables\Columns\TextColumn::make('total')
                     ->label('Total')
@@ -1405,6 +1437,8 @@ class SaleResource extends Resource
                         ->visible(fn(Sale $record) => SunatNoteReader::buscarNotaParaVenta($record, 'debito') !== null),
 
                     // 🌟 ACCIÓN DE REGULARIZACIÓN DE NOTA DE CRÉDITO
+                    static::abonoAction(Tables\Actions\Action::make('registrar_abono')),
+
                     Tables\Actions\Action::make('cambio_devolucion')
                         ->label('Cambio / devolución')
                         ->icon('heroicon-o-arrows-right-left')
@@ -1668,6 +1702,39 @@ class SaleResource extends Resource
                         }),
                 ]),
             ]);
+    }
+
+    /** Abono a una venta a crédito (se usa en Ventas y en Cuentas por cobrar). */
+    public static function abonoAction($action)
+    {
+        return $action
+            ->label('Registrar abono')
+            ->icon('heroicon-o-banknotes')
+            ->color('success')
+            ->visible(fn (Sale $record) => (float) $record->credit_balance > 0 && auth()->user()?->can('create_customer::payment'))
+            ->modalHeading(fn (Sale $record) => "Abono a {$record->serie}-{$record->correlative}")
+            ->modalDescription(fn (Sale $record) => 'Saldo pendiente: S/ ' . number_format((float) $record->credit_balance, 2)
+                . ($record->due_date ? ' · vence ' . $record->due_date->format('d/m/Y') : ''))
+            ->form(fn (Sale $record) => [
+                Forms\Components\TextInput::make('amount')->label('Monto')->numeric()->prefix('S/')
+                    ->minValue(0.01)->maxValue((float) $record->credit_balance)->default((float) $record->credit_balance)->required(),
+                Forms\Components\Select::make('payment_method')->label('Medio de pago')
+                    ->options(\App\Services\CreditService::METHODS)->default('efectivo')->required(),
+                Forms\Components\TextInput::make('reference')->label('N.º de operación (opcional)')->maxLength(60),
+            ])
+            ->action(function (Sale $record, array $data) {
+                try {
+                    \App\Services\CreditService::registerPayment($record, $data['payment_method'], (float) $data['amount'], $data['reference'] ?? null);
+                } catch (\Illuminate\Validation\ValidationException $e) {
+                    Notification::make()->title(collect($e->errors())->flatten()->first())->danger()->send();
+
+                    return;
+                }
+                $saldo = (float) $record->fresh()->credit_balance;
+                Notification::make()->title('Abono registrado')
+                    ->body($saldo > 0 ? 'Saldo pendiente: S/ ' . number_format($saldo, 2) : 'La venta quedó pagada.')
+                    ->success()->send();
+            });
     }
 
     public static function getEloquentQuery(): Builder

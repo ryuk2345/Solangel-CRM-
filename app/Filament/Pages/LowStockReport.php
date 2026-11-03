@@ -26,7 +26,7 @@ class LowStockReport extends Page implements HasTable
     protected static ?string $navigationLabel = 'Stock bajo';
     protected static ?string $title = 'Stock bajo y reposición';
     protected static ?int $navigationSort = 5;
-    protected static string $view = 'filament.pages.low-stock-report';
+    protected static string $view = 'filament.pages.table-page';
 
     protected function baseQuery(): Builder
     {

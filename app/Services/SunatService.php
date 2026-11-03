@@ -191,7 +191,7 @@ class SunatService
                 ->setCorrelativo(str_pad($venta->correlative, 8, '0', STR_PAD_LEFT))
                 ->setFechaEmision(new \DateTime($venta->issue_date))
                 ->setTipoMoneda('PEN')
-                ->setFormaPago(new FormaPagoContado())
+                ->setFormaPago($this->formaPago($venta, $tipoDocVenta))
                 ->setCompany($this->getCompany($branch))
                 ->setClient($cliente)
                 ->setMtoOperGravadas($venta->subtotal)
@@ -247,6 +247,12 @@ class SunatService
 
             $invoice->setDetails($details)
                 ->setLegends([(new Legend())->setCode('1000')->setValue('SON: ' . $venta->total . ' SOLES')]);
+
+            // Factura a crédito: cuota con el saldo y su vencimiento (obligatorio para SUNAT)
+            if ($this->cuotasCredito) {
+                $invoice->setCuotas($this->cuotasCredito);
+                $this->cuotasCredito = null;
+            }
 
             // 7. ENVÍO A SUNAT
             $see = $this->getSee();
@@ -326,6 +332,30 @@ class SunatService
             return ['error' => 'Error al declarar boleta/factura: ' . $e->getMessage()];
         }
     }
+
+    /**
+     * Forma de pago de la factura (Etapa 8b): al contado, o a crédito con una cuota por el saldo
+     * que quedó pendiente al vender (total menos el adelanto), con su fecha de vencimiento.
+     */
+    private function formaPago(SaleModel $venta, string $tipoDoc): \Greenter\Model\Sale\PaymentTerms
+    {
+        if ($venta->payment_condition !== 'credito' || $tipoDoc !== '01') {
+            return new FormaPagoContado();
+        }
+
+        // Lo pagado al vender (adelanto y saldo a favor) está en sale_payments; los abonos posteriores no cuentan aquí
+        $pendiente = round((float) $venta->total - (float) $venta->payments()->sum('amount'), 2);
+        $vence = $venta->due_date ? new \DateTime(\Carbon\Carbon::parse($venta->due_date)->toDateString()) : (new \DateTime())->modify('+30 days');
+
+        $this->cuotasCredito = [
+            (new \Greenter\Model\Sale\Cuota())->setMoneda('PEN')->setMonto($pendiente)->setFechaPago($vence),
+        ];
+
+        return new \Greenter\Model\Sale\FormaPagos\FormaPagoCredito($pendiente, 'PEN');
+    }
+
+    /** @var array<\Greenter\Model\Sale\Cuota>|null Cuotas de la factura a crédito en preparación. */
+    private ?array $cuotasCredito = null;
 
     public function emitirNotaCredito($venta, $codigoMotivo, $descripcionMotivo)
     {

@@ -72,6 +72,12 @@ class ScreensSmokeTest extends TestCase
             Resources\QuotationResource\Pages\CreateQuotation::class,
             Resources\WholesalePriceRequestResource\Pages\ListWholesalePriceRequests::class,
             Resources\SaleReturnResource\Pages\ListSaleReturns::class,
+            Resources\CustomerPaymentResource\Pages\ListCustomerPayments::class,
+            Resources\CustomerResource\Pages\EditCustomer::class => null,
+            Pages\AccountsReceivable::class,
+            Resources\CustomerPaymentResource\Pages\ListCustomerPayments::class,
+            Pages\AccountsReceivable::class,
+            Resources\CustomerResource\Pages\CreateCustomer::class,
             Resources\CustomerResource\Pages\ListCustomers::class,
             Resources\StockTransferResource\Pages\ListStockTransfers::class,
             Resources\StockTransferResource\Pages\CreateStockTransfer::class,
@@ -80,9 +86,13 @@ class ScreensSmokeTest extends TestCase
             Pages\PrintLabels::class,
         ];
 
-        foreach ($pages as $page) {
+        foreach ($pages as $key => $page) {
+            if ($page === null) {
+                continue; // páginas que necesitan un registro: se prueban abajo
+            }
             Livewire::test($page)->assertOk();
         }
+        Livewire::test(Resources\CustomerResource\Pages\EditCustomer::class, ['record' => Customer::where('customer_type', 'mayorista')->value('id')])->assertOk();
 
         Livewire::test(Resources\PurchaseResource\Pages\ViewPurchase::class, ['record' => \App\Models\Purchase::value('id')])->assertOk();
         Livewire::test(Resources\ProductResource\Pages\EditProduct::class, ['record' => \App\Models\Product::where('is_service', false)->value('id')])->assertOk();

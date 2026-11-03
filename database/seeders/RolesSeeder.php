@@ -68,7 +68,7 @@ class RolesSeeder extends Seeder
                 'product' => self::READ,
                 'product::variant' => self::READ,
                 'inventory' => self::READ,
-            ], ['page_Dashboard', 'page_StockMatrix', 'widget_LatestSalesWidget', 'exchange_sale']),
+            ], ['page_Dashboard', 'page_StockMatrix', 'page_AccountsReceivable', 'widget_LatestSalesWidget', 'exchange_sale']),
 
             'almacenero' => $this->pick($all, [
                 'product' => self::WRITE,

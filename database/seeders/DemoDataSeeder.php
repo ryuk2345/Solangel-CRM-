@@ -107,6 +107,7 @@ class DemoDataSeeder extends Seeder
         Customer::firstOrCreate(['document_number' => '20999999991'], [
             'document_type' => '6', 'name' => 'BOUTIQUE MAYORISTA DEMO S.A.C.', 'address' => 'Av. Gamarra 123, La Victoria',
             'customer_type' => 'mayorista',
+            'credit_enabled' => true, 'credit_limit' => 3000, 'credit_days' => 30,
         ]);
 
         // Un usuario por rol

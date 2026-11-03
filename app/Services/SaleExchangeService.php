@@ -177,6 +177,15 @@ class SaleExchangeService
             return;
         }
         $amount = round(min($amount, (float) $return->total), 2);
+
+        // Venta a crédito: la devolución primero reduce lo que el cliente debe; solo el resto se devuelve en efectivo
+        $sale = Sale::whereKey($return->sale_id)->lockForUpdate()->first();
+        if ($sale && (float) $sale->credit_balance > 0) {
+            $applied = round(min((float) $sale->credit_balance, $amount), 2);
+            $sale->update(['credit_balance' => round((float) $sale->credit_balance - $applied, 2)]);
+            $amount = round($amount - $applied, 2);
+        }
+
         if ($amount <= 0) {
             return;
         }

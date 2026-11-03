@@ -244,7 +244,39 @@ class CreateSale extends CreateRecord
             $rawPayments = $rawPayments->filter(fn($p) => (float)($p['amount'] ?? 0) > 0);
         }
 
-        if ($rawPayments->count() <= 1) {
+        // ─── Venta a crédito (mayoristas): lo pagado ahora es el adelanto; el resto queda como saldo ───
+        $esCredito = ($this->data['payment_condition'] ?? $data['payment_condition'] ?? 'contado') === 'credito';
+        $data['payment_condition'] = $esCredito ? 'credito' : 'contado';
+        $data['credit_balance'] = 0;
+        $data['due_date'] = null;
+
+        if ($esCredito) {
+            if (str_starts_with(trim((string) ($data['serie'] ?? '')), 'B')) {
+                Notification::make()->title('El crédito se registra con factura o nota de venta')
+                    ->body('Para vender a crédito elige Factura (cliente con RUC) o Nota de venta.')->danger()->persistent()->send();
+                $this->halt();
+            }
+
+            $rawPayments = $rawPayments->filter(fn ($p) => (float) ($p['amount'] ?? 0) > 0);
+            $adelanto = round($rawPayments->sum(fn ($p) => (float) $p['amount']), 2);
+            if ($adelanto >= $totalVenta) {
+                Notification::make()->title('El adelanto cubre toda la venta')->body('Regístrala al contado.')->warning()->send();
+                $this->halt();
+            }
+
+            $data['credit_balance'] = round($totalVenta - $adelanto, 2);
+            try {
+                $data['due_date'] = \App\Services\CreditService::assertCanSellOnCredit(
+                    \App\Models\Customer::find($data['customer_id'] ?? null), $data['credit_balance'], Auth::user(),
+                )->toDateString();
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                Notification::make()->title('No se puede vender a crédito')->body(collect($e->errors())->flatten()->first())->danger()->persistent()->send();
+                $this->halt();
+            }
+
+            $this->data['payments'] = $rawPayments->values()->toArray();
+            $data['payment_method'] = $rawPayments->isEmpty() ? 'credito' : 'múltiple';
+        } elseif ($rawPayments->count() <= 1) {
             // Pago único: asignar monto igual al total de la venta
             $primerPago = $rawPayments->first();
             $metodo = $primerPago['payment_method'] ?? 'efectivo';
@@ -506,7 +538,9 @@ class CreateSale extends CreateRecord
         $totalVentaFinal = (float) $venta->fresh()->total;
         $pagosRel = $venta->payments()->get();
 
-        if ($pagosRel->count() <= 1) {
+        if ($venta->payment_condition === 'credito') {
+            $pagosRel->filter(fn ($p) => (float) $p->amount <= 0)->each->delete();
+        } elseif ($pagosRel->count() <= 1) {
             $primerPago = $pagosRel->first();
             if ($primerPago) {
                 if ((float)$primerPago->amount !== $totalVentaFinal) {

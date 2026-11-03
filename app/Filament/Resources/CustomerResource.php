@@ -106,7 +106,23 @@ class CustomerResource extends Resource
                     ->default('minorista')
                     ->inline()
                     ->required()
+                    ->live()
                     ->helperText('Desde ' . \App\Models\CompanySetting::wholesaleMinQty() . ' prendas todos pagan precio mayorista. Un cliente mayorista puede llevar 1 prenda a precio mayorista solo con aprobación de un administrador.'),
+
+                Forms\Components\Fieldset::make('Crédito (solo mayoristas)')
+                    ->visible(fn (Forms\Get $get) => $get('customer_type') === 'mayorista')
+                    ->disabled(fn () => !auth()->user()?->can('manage_credit'))
+                    ->columns(3)
+                    ->schema([
+                        Forms\Components\Toggle::make('credit_enabled')->label('Puede comprar a crédito')->live()->inline(false),
+                        Forms\Components\TextInput::make('credit_limit')->label('Límite de crédito')->numeric()->minValue(0)->prefix('S/')
+                            ->helperText('Vacío = sin límite')->visible(fn (Forms\Get $get) => (bool) $get('credit_enabled')),
+                        Forms\Components\TextInput::make('credit_days')->label('Días para pagar')->numeric()->minValue(1)->default(30)
+                            ->visible(fn (Forms\Get $get) => (bool) $get('credit_enabled')),
+                        Forms\Components\Placeholder::make('deuda')->label('Deuda actual')
+                            ->content(fn (?\App\Models\Customer $record) => 'S/ ' . number_format($record?->outstandingBalance() ?? 0, 2))
+                            ->visible(fn (?\App\Models\Customer $record) => $record !== null),
+                    ]),
 
                 Forms\Components\TextInput::make('address')
                     ->label('Dirección Física')
@@ -149,6 +165,12 @@ class CustomerResource extends Resource
                     ->badge()
                     ->formatStateUsing(fn ($state) => ucfirst($state))
                     ->color(fn ($state) => $state === 'mayorista' ? 'warning' : 'gray'),
+
+                Tables\Columns\TextColumn::make('deuda')
+                    ->label('Deuda')
+                    ->state(fn (\App\Models\Customer $record) => $record->outstandingBalance())
+                    ->money('PEN')
+                    ->color(fn ($state) => $state > 0 ? 'danger' : 'gray'),
 
                 Tables\Columns\TextColumn::make('email')
                     ->label('Correo')
