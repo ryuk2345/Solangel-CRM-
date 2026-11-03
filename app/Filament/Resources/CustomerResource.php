@@ -98,6 +98,16 @@ class CustomerResource extends Resource
                     ->required()
                     ->maxLength(255),
 
+                Forms\Components\ToggleButtons::make('customer_type')
+                    ->label('Tipo de cliente')
+                    ->options(['minorista' => 'Minorista', 'mayorista' => 'Mayorista'])
+                    ->icons(['minorista' => 'heroicon-o-user', 'mayorista' => 'heroicon-o-building-storefront'])
+                    ->colors(['minorista' => 'gray', 'mayorista' => 'warning'])
+                    ->default('minorista')
+                    ->inline()
+                    ->required()
+                    ->helperText('Desde ' . \App\Models\CompanySetting::wholesaleMinQty() . ' prendas todos pagan precio mayorista. Un cliente mayorista puede llevar 1 prenda a precio mayorista solo con aprobación de un administrador.'),
+
                 Forms\Components\TextInput::make('address')
                     ->label('Dirección Física')
                     ->maxLength(255)
@@ -134,6 +144,12 @@ class CustomerResource extends Resource
                     })
                     ->wrap(), // 🌟 LA MAGIA: Rompe el texto largo en varias líneas
                     
+                Tables\Columns\TextColumn::make('customer_type')
+                    ->label('Tipo')
+                    ->badge()
+                    ->formatStateUsing(fn ($state) => ucfirst($state))
+                    ->color(fn ($state) => $state === 'mayorista' ? 'warning' : 'gray'),
+
                 Tables\Columns\TextColumn::make('email')
                     ->label('Correo')
                     ->searchable()
@@ -143,7 +159,9 @@ class CustomerResource extends Resource
                     ->label('Teléfono'),
             ])
             ->filters([
-                //
+                Tables\Filters\SelectFilter::make('customer_type')
+                    ->label('Tipo')
+                    ->options(['minorista' => 'Minorista', 'mayorista' => 'Mayorista']),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),

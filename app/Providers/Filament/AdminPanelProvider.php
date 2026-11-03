@@ -42,6 +42,10 @@ class AdminPanelProvider extends PanelProvider
             // 🌟 ACTIVAR EL BOTÓN DE MODO OSCURO (Aparecerá arriba a la derecha)
             ->darkMode(true)
 
+            // Avisos dentro del sistema (por ejemplo: aprobaciones de precio mayorista pendientes)
+            ->databaseNotifications()
+            ->databaseNotificationsPolling('20s')
+
             ->colors([
                 'primary' => '#e11d48', // Tu Rojo/Rosa vibrante
                 'danger' => '#b91c1c',

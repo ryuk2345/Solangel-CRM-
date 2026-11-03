@@ -80,6 +80,11 @@ class Sale extends Model
     {
         return $this->belongsTo(User::class, 'seller_id');
     }
+    public function wholesaleRequest()
+    {
+        return $this->belongsTo(WholesalePriceRequest::class, 'wholesale_request_id');
+    }
+
     public function warehouse()
     {
         return $this->belongsTo(Warehouse::class);

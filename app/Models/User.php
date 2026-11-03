@@ -25,6 +25,7 @@ class User extends Authenticatable implements FilamentUser
         'email',
         'password',
         'branch_id',
+        'approval_pin',
     ];
 
     /**
@@ -35,6 +36,7 @@ class User extends Authenticatable implements FilamentUser
     protected $hidden = [
         'password',
         'remember_token',
+        'approval_pin',
     ];
 
     /**
@@ -47,6 +49,7 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'approval_pin' => 'hashed',
         ];
     }
 
@@ -74,6 +77,14 @@ class User extends Authenticatable implements FilamentUser
     public function isAdministrator(): bool
     {
         return $this->hasAnyRole(['super_admin', 'administrador']);
+    }
+
+    /** Valida el PIN de aprobación del administrador (precio mayorista para 1 prenda). */
+    public function checkApprovalPin(?string $pin): bool
+    {
+        return filled($pin) && filled($this->approval_pin)
+            && $this->can('authorize_wholesale_price')
+            && \Illuminate\Support\Facades\Hash::check($pin, $this->approval_pin);
     }
 
     /** Administrador y super_admin ven y operan todas las tiendas; el resto, solo la suya. */

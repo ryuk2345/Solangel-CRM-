@@ -69,6 +69,17 @@ class UserResource extends Resource
                     ->preload()
                     ->searchable()
                     ->disabled(!$isSuperAdmin),
+
+                Forms\Components\TextInput::make('approval_pin')
+                    ->label('PIN de aprobación (4 a 6 dígitos)')
+                    ->helperText('Solo para administradores: con este PIN aprueban el precio mayorista de 1 prenda. Déjalo vacío para no cambiarlo.')
+                    ->password()
+                    ->revealable()
+                    ->formatStateUsing(fn () => null)
+                    ->regex('/^\\d{4,6}$/')
+                    ->validationMessages(['regex' => 'El PIN debe tener de 4 a 6 números.'])
+                    ->dehydrated(fn ($state) => filled($state))
+                    ->visible($isSuperAdmin),
             ]);
     }
 

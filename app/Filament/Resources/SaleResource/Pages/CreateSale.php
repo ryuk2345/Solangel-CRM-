@@ -17,6 +17,12 @@ class CreateSale extends CreateRecord
     protected static string $resource = SaleResource::class;
     protected ?int $cajaValidaId = null;
 
+    /**
+     * Toda la creación (correlativo, venta, detalle, stock, pagos y caja) va en una transacción:
+     * si falta stock al descontar, no queda nada a medias. SUNAT se envía después del commit.
+     */
+    protected ?bool $hasDatabaseTransactions = true;
+
     // 🌟 1. EL BLOQUEO INICIAL: Se ejecuta antes de cargar la pantalla
     public function mount(): void
     {
@@ -74,21 +80,74 @@ class CreateSale extends CreateRecord
     // 2. ANTES DE GUARDAR: Validamos sucursal y asignamos número con candado
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // ─── 1. CALCULAR TOTAL DE LA VENTA (Misma fórmula que sales.total) ───
+        // ─── 1. PRECIOS CALCULADOS EN EL SERVIDOR (regla minorista/mayorista) ───
+        // Lo que manda el formulario no se cree: se vuelve a calcular todo (PLAN_MODA H1/H2).
         $totalVenta = 0.0;
         if (!empty($data['is_quick_sale'])) {
-            $totalVenta = round((float)($data['quick_sale_total'] ?? $this->data['quick_sale_total'] ?? 0), 2);
-        } else {
-            $items = $this->data['items'] ?? $data['items'] ?? [];
-            $totalVenta = round(collect($items)->sum(function ($item) {
-                if (isset($item['total']) && is_numeric($item['total'])) {
-                    return (float)$item['total'];
-                }
-                $cant = (float)($item['quantity'] ?? 1);
-                $precio = (float)($item['price'] ?? 0);
-                return $cant * $precio;
-            }), 2);
+            Notification::make()->title('La venta rápida fue retirada')->body('Registra la venta con sus prendas.')->danger()->send();
+            $this->halt();
         }
+
+        $items = collect($this->data['items'] ?? [])
+            ->filter(fn ($i) => !empty($i['product_variant_id']))
+            ->all();
+
+        if (empty($items)) {
+            Notification::make()->title('Agrega al menos una prenda')->danger()->send();
+            $this->halt();
+        }
+
+        $warehouseId = \App\Support\SaleCart::warehouseFor($data['branch_id'] ?? null, $data['warehouse_id'] ?? null);
+        $data['warehouse_id'] = $warehouseId;
+
+        $requestId = $this->data['wholesale_request_id'] ?? null;
+        $pendingRequest = $requestId ? \App\Models\WholesalePriceRequest::find($requestId) : null;
+        if ($pendingRequest && $pendingRequest->status === 'pendiente') {
+            Notification::make()
+                ->title('Hay una aprobación pendiente')
+                ->body('Espera a que el administrador apruebe o rechace el precio mayorista, o pide que lo apruebe aquí con su PIN.')
+                ->warning()->persistent()->send();
+            $this->halt();
+        }
+
+        $pricing = \App\Services\PricingService::apply(
+            $items,
+            isset($data['customer_id']) ? (int) $data['customer_id'] : null,
+            isset($data['branch_id']) ? (int) $data['branch_id'] : null,
+            $requestId ? (int) $requestId : null,
+            Auth::user(),
+        );
+
+        // Delivery solo si alguna prenda lo permite (decisión 4)
+        $hasService = collect($pricing['lines'])->contains(fn ($l) => ($l['price_type'] ?? null) === 'service');
+        if ($hasService && !\App\Support\SaleCart::allowsDelivery($items)) {
+            Notification::make()->title('Delivery no disponible')
+                ->body('Ninguna prenda de esta venta permite delivery.')->danger()->persistent()->send();
+            $this->halt();
+        }
+        if ($pricing['garments'] < 1) {
+            Notification::make()->title('La venta debe tener al menos una prenda')->danger()->send();
+            $this->halt();
+        }
+
+        // Sin stock negativo (decisión 5): se revisa antes y se vuelve a revisar al descontar con bloqueo
+        $faltantes = \App\Services\StockService::shortages($pricing['lines'], (int) $warehouseId);
+        if (!empty($faltantes)) {
+            Notification::make()
+                ->title('Stock insuficiente')
+                ->body(implode("\n", $faltantes))
+                ->danger()->persistent()->send();
+            $this->halt();
+        }
+
+        foreach ($pricing['lines'] as $key => $line) {
+            $pricing['lines'][$key]['price_set_by'] = ($line['price_reason'] ?? null) === 'manual' ? Auth::id() : null;
+        }
+
+        $this->data['items'] = $pricing['lines'];
+        $data['price_mode'] = $pricing['mode'];
+        $data['wholesale_request_id'] = $pricing['reason'] === 'authorized' ? (int) $requestId : null;
+        $totalVenta = $pricing['total'];
 
         // ─── 1.5. BLOQUEAR LÍNEAS EN PRECIO 0 PARA BOLETAS Y FACTURAS ───
         $esElectronico = !str_starts_with(trim((string)($data['serie'] ?? '')), 'NV');
@@ -97,14 +156,14 @@ class CreateSale extends CreateRecord
                 if ($totalVenta <= 0) {
                     Notification::make()
                         ->title('Línea con precio 0 no permitida')
-                        ->body('Las boletas y facturas no admiten líneas con precio 0. Escribe la placa u observación en la descripción del producto.')
+                        ->body('Las boletas y facturas no admiten líneas con precio 0. Revisa los precios del modelo.')
                         ->danger()
                         ->persistent()
                         ->send();
                     $this->halt();
                 }
             } else {
-                $itemsCheck = $this->data['items'] ?? $data['items'] ?? [];
+                $itemsCheck = $this->data['items'] ?? [];
                 foreach ($itemsCheck as $item) {
                     $precio = (float)($item['price'] ?? 0);
                     $cant = (float)($item['quantity'] ?? 1);
@@ -115,7 +174,7 @@ class CreateSale extends CreateRecord
                     if ($precio <= 0 || $totalLinea <= 0) {
                         Notification::make()
                             ->title('Línea con precio 0 no permitida')
-                            ->body('Las boletas y facturas no admiten líneas con precio 0. Escribe la placa u observación en la descripción del producto.')
+                            ->body('Las boletas y facturas no admiten líneas con precio 0. Revisa los precios del modelo.')
                             ->danger()
                             ->persistent()
                             ->send();
@@ -317,88 +376,62 @@ class CreateSale extends CreateRecord
         return $record;
     }
 
-    // 3. DESPUÉS DE GUARDAR
+    // 3. DESPUÉS DE GUARDAR (todavía dentro de la transacción)
     protected function afterCreate(): void
-    {
-        // ─── ENVOLTURA GLOBAL: ningún error aquí debe producir un 500 ───
-        try {
-            $this->procesarPostCreacion();
-        } catch (\Throwable $e) {
-            // El comprobante YA fue guardado. Solo notificamos el fallo interno.
-            Log::error('[CreateSale] Error en afterCreate: ' . $e->getMessage(), [
-                'sale_id' => $this->record?->id,
-                'file'    => $e->getFile(),
-                'line'    => $e->getLine(),
-            ]);
-
-            Notification::make()
-                ->title('Venta guardada ✓')
-                ->body('Se guardó correctamente, pero hubo un error interno: ' . $e->getMessage())
-                ->warning()
-                ->send();
-        }
-    }
-
-    // Lógica real separada para poder capturar cualquier Throwable
-    private function procesarPostCreacion(): void
     {
         $venta = $this->record;
 
-        // ── 1. VENTA RÁPIDA vs NORMAL (Calcular totalReal) ──
-        if ($venta->is_quick_sale) {
-            $totalReal = (float)$venta->total;
-        } else {
-            $totalReal = 0;
-            DB::transaction(function () use ($venta, &$totalReal) {
-                foreach ($venta->items as $item) {
-                    $totalReal += (float)($item->total ?? 0);
-
-                    $variante = \App\Models\ProductVariant::with('product')
-                        ->find($item->product_variant_id);
-
-                    if ($variante) {
-                        if ($variante->sku === 'REPE-GENERICO') continue;
-                        if ($variante->product && $variante->product->is_service) continue;
-                    }
-
-                    $warehouseId = $venta->warehouse_id ?? $venta->branch?->defaultWarehouse?->id ?? 1;
-
-                    $inventario = Inventory::where('product_variant_id', $item->product_variant_id)
-                        ->where('warehouse_id', $warehouseId)
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (!$inventario) {
-                        $inventario = Inventory::firstOrCreate(
-                            [
-                                'product_variant_id' => $item->product_variant_id,
-                                'warehouse_id' => $warehouseId,
-                            ],
-                            [
-                                'branch_id' => $venta->branch_id,
-                                'stock' => 0,
-                            ]
-                        );
-                        $inventario = Inventory::where('id', $inventario->id)->lockForUpdate()->first();
-                    }
-
-                    if ($inventario) {
-                        $inventario->decrement('stock', (int)($item->quantity ?? 1));
-                    }
+        // ── 1. STOCK: descuento con bloqueo y kardex. Si falta stock, se deshace toda la venta. ──
+        try {
+            $venta->load('items.productVariant.product');
+            foreach ($venta->items as $item) {
+                if (!$item->productVariant || $item->productVariant->product?->is_service) {
+                    continue;
                 }
-
-                $subtotal = round($totalReal / 1.18, 2);
-                $igv      = round($totalReal - $subtotal, 2);
-
-                $venta->update([
-                    'total'    => $totalReal,
-                    'subtotal' => $subtotal,
-                    'igv'      => $igv,
-                ]);
-            });
+                \App\Services\StockService::move(
+                    (int) $item->product_variant_id,
+                    (int) $venta->warehouse_id,
+                    -1 * (int) $item->quantity,
+                    'sale',
+                    $venta,
+                    "Venta {$venta->serie}-{$venta->correlative}",
+                );
+            }
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Notification::make()
+                ->title('Stock insuficiente: la venta no se guardó')
+                ->body(collect($e->errors())->flatten()->implode("\n"))
+                ->danger()->persistent()->send();
+            $this->halt(shouldRollbackDatabaseTransaction: true);
         }
 
-        // ── 2. SINCRONIZAR Y VERIFICAR PAGOS CONTRA sales.total ──
+        // ── 2. Totales desde el detalle guardado ──
+        $totalReal = round((float) $venta->items()->sum('total'), 2);
+        $subtotal = round($totalReal / 1.18, 2);
+        $venta->update(['total' => $totalReal, 'subtotal' => $subtotal, 'igv' => round($totalReal - $subtotal, 2)]);
+
+        // ── 3. La aprobación de precio mayorista queda usada por esta venta ──
+        \App\Services\WholesaleApprovalService::markUsed($venta->wholesale_request_id, $venta);
+
+        // ── 4. Pagos y caja ──
+        $this->sincronizarPagosYCaja($venta);
+
+        // ── 5. SUNAT, recién cuando la venta quedó guardada (fuera de la transacción) ──
+        DB::afterCommit(function () use ($venta) {
+            try {
+                $this->enviarSunat($venta->fresh());
+            } catch (\Throwable $e) {
+                Log::error('[CreateSale] Error después de guardar: ' . $e->getMessage(), ['sale_id' => $venta->id]);
+                Notification::make()
+                    ->title('Venta guardada ✓')
+                    ->body('Se guardó correctamente, pero hubo un error interno: ' . $e->getMessage())
+                    ->warning()->send();
+            }
+        });
+    }
+
+    private function sincronizarPagosYCaja(\App\Models\Sale $venta): void
+    {
         $totalVentaFinal = (float) $venta->fresh()->total;
         $pagosRel = $venta->payments()->get();
 
@@ -438,32 +471,21 @@ class CreateSale extends CreateRecord
             }
         }
 
-        // ── 3. CAJA: Sumar exactamente el efectivo persistido en sale_payments ──
+        // Caja: sumar exactamente el efectivo guardado en sale_payments
         $montoEfectivo = (float) $venta->payments()
             ->where('payment_method', 'efectivo')
             ->sum('amount');
 
         if ($montoEfectivo > 0 && $this->cajaValidaId) {
-            $caja = CashRegister::find($this->cajaValidaId);
+            $caja = CashRegister::whereKey($this->cajaValidaId)->lockForUpdate()->first();
             if ($caja && $caja->status === 'abierta') {
                 $caja->increment('cash_sales', $montoEfectivo);
             }
         }
+    }
 
-        // ── 4. NOTIFICACIÓN VENTA RÁPIDA ──
-        if ($venta->is_quick_sale) {
-            $venta->update(['sunat_status' => 'pendiente']);
-
-            Notification::make()
-                ->title('⚡ Venta Rápida Registrada')
-                ->body('Recuerda auditar los repuestos para descontar el stock y declarar a SUNAT.')
-                ->warning()
-                ->send();
-
-            return;
-        }
-
-        // ── SUNAT ─────────────────────────────────────────────────────
+    private function enviarSunat(\App\Models\Sale $venta): void
+    {
         if (str_starts_with($venta->serie, 'NV')) {
             $venta->update(['sunat_status' => 'aceptado']);
             return;

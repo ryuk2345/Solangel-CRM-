@@ -137,126 +137,65 @@ class QuotationResource extends Resource
 
                 Forms\Components\Section::make('Detalle de Prendas')
                     ->schema([
+                        Forms\Components\Placeholder::make('price_mode_view')
+                            ->hiddenLabel()
+                            ->content(fn (Get $get) => new \Illuminate\Support\HtmlString(
+                                '<div class="text-base font-bold">' . e(\App\Support\SaleCart::summary($get)) . '</div>'
+                            )),
                         Forms\Components\Repeater::make('items')
                             ->hiddenLabel() 
                             ->relationship('items')
-                            ->addActionLabel('➕ Agregar Ítem')
-                            ->defaultItems(1) 
+                            ->addActionLabel('➕ Agregar prenda')
+                            ->defaultItems(1)
+                            ->live()
+                            ->afterStateUpdated(fn (Get $get, Set $set) => \App\Support\SaleCart::recalc($get, $set))
                             ->schema([
                                 Forms\Components\Grid::make(12) 
                                     ->schema([
                                         Forms\Components\Select::make('product_variant_id')
                                             ->label('Prenda (modelo / color / talla) o delivery')
                                             ->searchable()
-                                            ->getSearchResultsUsing(function (string $search, Get $get) {
-                                                $branchId = $get('../../branch_id');
-                                                if (!$branchId) return [];
-
-                                                $query = \App\Models\Inventory::with(['productVariant.product'])
-                                                    ->where('branch_id', $branchId)
-                                                    ->whereHas('productVariant.product.branches', function ($b) use ($branchId) {
-                                                        $b->where('branches.id', $branchId);
-                                                    });
-
-                                                if (!empty($search)) {
-                                                    $query->whereHas('productVariant', function ($q) use ($search) {
-                                                        $q->where('sku', 'like', "%{$search}%")
-                                                          ->orWhereHas('product', function ($qp) use ($search) {
-                                                              $qp->where('name', 'like', "%{$search}%");
-                                                          });
-                                                    });
-                                                }
-
-                                                $inventarios = $query->limit(50)->get();
-
-                                                $opciones = $inventarios->mapWithKeys(function ($inv) {
-                                                    $variant = $inv->productVariant;
-                                                    if (!$variant || !$variant->product) return [];
-                                                    $prefix = $inv->stock <= 0 ? '⚠️ [SIN STOCK] ' : '';
-                                                    return [$variant->id => "{$prefix}[{$variant->sku}] {$variant->product->name} - [{$variant->color_name} / {$variant->size}] (Stock: {$inv->stock})"];
-                                                })->toArray();
-
-                                                $serviciosQuery = \App\Models\ProductVariant::with('product')
-                                                    ->whereHas('product', function($q) {
-                                                        $q->where('is_service', true);
-                                                    });
-
-                                                if (!empty($search)) {
-                                                    $serviciosQuery->whereHas('product', function($q) use ($search) {
-                                                        $q->where('name', 'like', "%{$search}%");
-                                                    });
-                                                }
-
-                                                $servicios = $serviciosQuery->limit(10)->get();
-                                                
-                                                foreach($servicios as $ser) {
-                                                    if ($ser->product) {
-                                                        $opciones[$ser->id] = "🔧 {$ser->product->name} (Servicio)";
-                                                    }
-                                                }
-
-                                                return $opciones;
-                                            })
-                                            ->getOptionLabelUsing(function ($value) {
-                                                $variant = \App\Models\ProductVariant::with(['product'])->find($value);
-                                                if (!$variant) return '';
-                                                if ($variant->product?->is_service) {
-                                                    return "🔧 {$variant->product->name} (Servicio)";
-                                                }
-                                                $inv = \App\Models\Inventory::where('product_variant_id', $value)->first();
-                                                $stock = $inv ? $inv->stock : 0;
-                                                $prefix = $stock <= 0 ? '⚠️ [SIN STOCK] ' : '';
-                                                return "{$prefix}[{$variant->sku}] {$variant->product?->name} - [{$variant->color_name} / {$variant->size}] (Stock: {$stock})";
-                                            })
+                                            ->getSearchResultsUsing(fn (string $search, Get $get) => \App\Support\SaleCart::options(
+                                                $search,
+                                                $get('../../branch_id') ? (int) $get('../../branch_id') : null,
+                                                null,
+                                                includeOutOfStock: true,
+                                            ))
+                                            ->getOptionLabelUsing(fn ($value, Get $get) => \App\Support\SaleCart::optionLabel(
+                                                $value,
+                                                \App\Support\SaleCart::warehouseFor($get('../../branch_id'), null),
+                                            ))
                                             ->required()
                                             ->live()
                                             ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                                $variante = \App\Models\ProductVariant::find($state);
-                                                if ($variante && $variante->product) {
-                                                    $set('price', $variante->product->sale_price ?? 0);
-                                                    if ($variante->product->is_service) {
-                                                        $set('product_name', $variante->product->name);
-                                                    } else {
-                                                        $set('product_name', "{$variante->product->name} ({$variante->color_name} - {$variante->size})");
-                                                    }
-
-                                                    $cant = (int) ($get('quantity') ?: 1);
-                                                    $total = (float)($variante->product->sale_price ?? 0) * $cant;
-                                                    $set('total', $total);
-                                                    $set('igv', round($total - ($total / 1.18), 2));
-                                                    $set('subtotal', round($total / 1.18, 2));
-                                                }
+                                                $variant = \App\Models\ProductVariant::with('product')->find($state);
+                                                $set('product_name', $variant?->product?->is_service ? $variant->product->name : ($variant?->display_name ?? ''));
+                                                $set('price_reason', null);
+                                                \App\Support\SaleCart::recalc($get, $set, '../../');
                                             })
                                             ->columnSpan(6),
 
                                         Forms\Components\TextInput::make('quantity')
                                             ->label('Cant.')
                                             ->numeric()
+                                            ->minValue(1)
                                             ->default(1)
                                             ->required()
                                             ->live(onBlur: true)
-                                            ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                                $precio = (float) ($get('price') ?? 0);
-                                                $totalLinea = $state * $precio;
-                                                $set('total', number_format($totalLinea, 2, '.', ''));
-                                                $set('igv', round($totalLinea - ($totalLinea / 1.18), 2));
-                                                $set('subtotal', round($totalLinea / 1.18, 2));
-                                            })
+                                            ->afterStateUpdated(fn (Set $set, Get $get) => \App\Support\SaleCart::recalc($get, $set, '../../'))
                                             ->columnSpan(2),
 
                                         Forms\Components\TextInput::make('price')
-                                            ->label('Precio (S/)') 
+                                            ->label('Precio (S/)')
                                             ->numeric()
                                             ->required()
+                                            ->readOnly(fn () => !auth()->user()?->can('edit_sale_price'))
                                             ->live(onBlur: true)
-                                            ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                                $precio = (float) $state ?: 0;
-                                                $cantidad = (float) ($get('quantity') ?: 1);
-                                                $totalLinea = $precio * $cantidad;
-
-                                                $set('total', number_format($totalLinea, 2, '.', ''));
-                                                $set('igv', round($totalLinea - ($totalLinea / 1.18), 2));
-                                                $set('subtotal', round($totalLinea / 1.18, 2));
+                                            ->afterStateUpdated(function (Set $set, Get $get) {
+                                                if (auth()->user()?->can('edit_sale_price')) {
+                                                    $set('price_reason', 'manual');
+                                                }
+                                                \App\Support\SaleCart::recalc($get, $set, '../../');
                                             })
                                             ->columnSpan(2),
 
@@ -274,6 +213,8 @@ class QuotationResource extends Resource
 
                                         Forms\Components\Hidden::make('igv'),
                                         Forms\Components\Hidden::make('subtotal'),
+                                        Forms\Components\Hidden::make('price_type'),
+                                        Forms\Components\Hidden::make('price_reason')->dehydrated(false),
                                     ]),
                             ]),
                     ]),
@@ -553,6 +494,17 @@ class QuotationResource extends Resource
                             }
                         }
 
+                        $warehouseParaStock = \App\Support\SaleCart::warehouseFor($record->branch_id, null);
+                        $faltantes = \App\Services\StockService::shortages(
+                            $record->items->map(fn ($i) => ['product_variant_id' => $i->product_variant_id, 'quantity' => $i->quantity])->all(),
+                            (int) $warehouseParaStock,
+                        );
+                        if (!empty($faltantes)) {
+                            Notification::make()->title('Stock insuficiente para vender esta cotización')
+                                ->body(implode("\n", $faltantes))->danger()->persistent()->send();
+                            return;
+                        }
+
                         DB::beginTransaction();
                         try {
                             // Asignar correlativo seguro con lockForUpdate
@@ -612,33 +564,23 @@ class QuotationResource extends Resource
                                     'product_name' => $qItem->product_name,
                                     'quantity' => $qItem->quantity,
                                     'price' => $qItem->price,
+                                    'list_price' => $qItem->price,
+                                    'price_type' => $qItem->price_type,
                                     'igv' => $qItem->igv,
                                     'total' => $qItem->total,
                                 ]);
 
-                                // Descontar stock (solo si no es servicio)
+                                // Descontar stock por el kardex (sin stock negativo)
                                 $isService = $qItem->productVariant?->product?->is_service;
                                 if (!$isService) {
-                                    $inventario = \App\Models\Inventory::where('product_variant_id', $qItem->product_variant_id)
-                                        ->where('warehouse_id', $defaultWarehouseId)
-                                        ->lockForUpdate()
-                                        ->first();
-                                    if (!$inventario) {
-                                        $inventario = \App\Models\Inventory::firstOrCreate(
-                                            [
-                                                'product_variant_id' => $qItem->product_variant_id,
-                                                'warehouse_id' => $defaultWarehouseId,
-                                            ],
-                                            [
-                                                'branch_id' => $record->branch_id,
-                                                'stock' => 0,
-                                            ]
-                                        );
-                                        $inventario = \App\Models\Inventory::where('id', $inventario->id)->lockForUpdate()->first();
-                                    }
-                                    if ($inventario) {
-                                        $inventario->decrement('stock', $qItem->quantity);
-                                    }
+                                    \App\Services\StockService::move(
+                                        (int) $qItem->product_variant_id,
+                                        (int) $defaultWarehouseId,
+                                        -1 * (int) $qItem->quantity,
+                                        'sale',
+                                        $sale,
+                                        "Venta {$sale->serie}-{$sale->correlative} (cotización)",
+                                    );
                                 }
                             }
 
