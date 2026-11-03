@@ -49,12 +49,14 @@ class Inventory extends Model
     {
         $global = CompanySetting::lowStockThreshold();
 
+        // Sin joins: Filament aplica los filtros dentro de un where agrupado, donde un join se perdería
         return $query
-            ->join('product_variants as lsv', 'lsv.id', '=', 'inventories.product_variant_id')
-            ->join('products as lsp', 'lsp.id', '=', 'lsv.product_id')
-            ->where('lsp.is_service', false)
-            ->whereRaw('inventories.stock <= COALESCE(lsp.low_stock_threshold, ?)', [$global])
-            ->select('inventories.*');
+            ->whereHas('productVariant.product', fn ($p) => $p->where('is_service', false))
+            ->whereRaw(
+                'inventories.stock <= COALESCE((SELECT p.low_stock_threshold FROM product_variants v '
+                . 'INNER JOIN products p ON p.id = v.product_id WHERE v.id = inventories.product_variant_id), ?)',
+                [$global],
+            );
     }
 
     public function getLowStockThresholdAttribute(): int

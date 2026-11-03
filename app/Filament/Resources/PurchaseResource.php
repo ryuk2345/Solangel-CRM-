@@ -79,10 +79,10 @@ class PurchaseResource extends Resource
                             Forms\Components\Select::make('product_id')
                                 ->label('Modelo')
                                 ->searchable()
-                                ->getSearchResultsUsing(fn (string $s) => Product::where('is_service', false)
-                                    ->where(fn ($q) => $q->where('name', 'like', "%{$s}%")->orWhere('code', 'like', "%{$s}%"))
+                                ->getSearchResultsUsing(fn (string $search) => Product::where('is_service', false)
+                                    ->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%"))
                                     ->limit(50)->get()->mapWithKeys(fn ($p) => [$p->id => trim("[{$p->code}] {$p->name}")]))
-                                ->getOptionLabelUsing(fn ($v) => ($p = Product::find($v)) ? trim("[{$p->code}] {$p->name}") : null)
+                                ->getOptionLabelUsing(fn ($value) => ($p = Product::find($value)) ? trim("[{$p->code}] {$p->name}") : null)
                                 ->required()
                                 ->live()
                                 ->afterStateUpdated(fn ($state, Set $set) => $set('unit_cost', Product::find($state)?->purchase_price)),
@@ -142,12 +142,12 @@ class PurchaseResource extends Resource
                             Forms\Components\Select::make('product_variant_id')
                                 ->label('Prenda')
                                 ->searchable()
-                                ->getSearchResultsUsing(fn (string $s) => ProductVariant::with('product')
+                                ->getSearchResultsUsing(fn (string $search) => ProductVariant::with('product')
                                     ->whereHas('product', fn ($p) => $p->where('is_service', false))
-                                    ->where(fn ($q) => $q->where('barcode', $s)->orWhere('sku', 'like', "%{$s}%")
-                                        ->orWhereHas('product', fn ($p) => $p->where('name', 'like', "%{$s}%")))
+                                    ->where(fn ($q) => $q->where('barcode', $search)->orWhere('sku', 'like', "%{$search}%")
+                                        ->orWhereHas('product', fn ($p) => $p->where('name', 'like', "%{$search}%")))
                                     ->limit(50)->get()->mapWithKeys(fn ($v) => [$v->id => static::variantLabel($v)]))
-                                ->getOptionLabelUsing(fn ($v) => static::variantLabel(ProductVariant::with('product')->find($v)))
+                                ->getOptionLabelUsing(fn ($value) => static::variantLabel(ProductVariant::with('product')->find($value)))
                                 ->required()
                                 ->live()
                                 ->afterStateUpdated(fn ($state, Set $set) => $set('unit_cost', ProductVariant::with('product')->find($state)?->cost_price))
@@ -184,8 +184,8 @@ class PurchaseResource extends Resource
                 Tables\Columns\TextColumn::make('total')->label('Total')->money('PEN')
                     ->visible(fn () => auth()->user()?->can('view_cost_price')),
                 Tables\Columns\TextColumn::make('status')->label('Estado')->badge()
-                    ->formatStateUsing(fn ($s) => ucfirst($s))
-                    ->color(fn ($s) => $s === 'anulada' ? 'danger' : 'success'),
+                    ->formatStateUsing(fn ($state) => ucfirst($state))
+                    ->color(fn ($state) => $state === 'anulada' ? 'danger' : 'success'),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('supplier_id')->relationship('supplier', 'name')->label('Proveedor')->preload(),

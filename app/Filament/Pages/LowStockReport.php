@@ -45,7 +45,7 @@ class LowStockReport extends Page implements HasTable
                 Tables\Columns\TextColumn::make('warehouse.branch.name')->label('Tienda')->toggleable(),
                 Tables\Columns\TextColumn::make('warehouse.name')->label('Almacén'),
                 Tables\Columns\TextColumn::make('productVariant.product.name')->label('Modelo')->wrap()
-                    ->searchable(query: fn (Builder $query, string $search) => $query->where('lsp.name', 'like', "%{$search}%")),
+                    ->searchable(query: fn (Builder $query, string $search) => $query->whereHas('productVariant.product', fn ($p) => $p->where('name', 'like', "%{$search}%"))),
                 Tables\Columns\TextColumn::make('productVariant.color_name')->label('Color'),
                 Tables\Columns\TextColumn::make('productVariant.size')->label('Talla'),
                 Tables\Columns\TextColumn::make('productVariant.sku')->label('SKU')->toggleable(),

@@ -42,12 +42,12 @@ class PrintLabels extends Page implements HasForms
                     Forms\Components\Select::make('product_variant_id')
                         ->label('Prenda')
                         ->searchable()
-                        ->getSearchResultsUsing(fn (string $s) => ProductVariant::with('product')
+                        ->getSearchResultsUsing(fn (string $search) => ProductVariant::with('product')
                             ->whereHas('product', fn ($p) => $p->where('is_service', false))
-                            ->where(fn ($q) => $q->where('barcode', $s)->orWhere('sku', 'like', "%{$s}%")
-                                ->orWhereHas('product', fn ($p) => $p->where('name', 'like', "%{$s}%")))
+                            ->where(fn ($q) => $q->where('barcode', $search)->orWhere('sku', 'like', "%{$search}%")
+                                ->orWhereHas('product', fn ($p) => $p->where('name', 'like', "%{$search}%")))
                             ->limit(50)->get()->mapWithKeys(fn ($v) => [$v->id => "[{$v->sku}] {$v->display_name}"]))
-                        ->getOptionLabelUsing(fn ($v) => ($x = ProductVariant::with('product')->find($v)) ? "[{$x->sku}] {$x->display_name}" : null)
+                        ->getOptionLabelUsing(fn ($value) => ($x = ProductVariant::with('product')->find($value)) ? "[{$x->sku}] {$x->display_name}" : null)
                         ->required()
                         ->columnSpan(5),
                     Forms\Components\TextInput::make('quantity')->label('Cantidad')->numeric()->minValue(1)->maxValue(500)->default(1)->required(),

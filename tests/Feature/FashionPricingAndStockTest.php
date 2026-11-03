@@ -320,4 +320,40 @@ class FashionPricingAndStockTest extends TestCase
         $this->assertSame('usada', $request->fresh()->status);
         $this->assertSame($sale->id, $request->fresh()->sale_id);
     }
+
+    public function test_punto_de_venta_escanear_y_elegir_por_modelo_agregan_prendas_con_precio(): void
+    {
+        $this->actingAs($this->vendedor);
+        $this->openRegister($this->vendedor);
+        $a = $this->variant(5);
+        $b = $this->variant(5, 1);
+
+        // La sección tiene key 'detalle' (sin prefijo data.), así que se llama a la acción como lo hace el navegador
+        $act = fn ($c, string $name, array $data) => $c
+            ->call('mountFormComponentAction', 'detalle', $name)
+            ->set('mountedFormComponentActionsData.0', $data)
+            ->call('callMountedFormComponentAction');
+
+        $component = Livewire::test(CreateSale::class)
+            ->set('data.customer_id', $this->minorista->id)
+            ->set('data.items', []);
+        $act($component, 'scan', ['code' => $a->barcode, 'quantity' => 1]);
+
+        $items = collect($component->get('data.items'));
+        $this->assertCount(1, $items);
+        $this->assertEquals($a->retail_price, $items->first()['price'], 'Con 1 prenda: minorista');
+        $this->assertSame($a->display_name, $items->first()['product_name']);
+
+        $act($component, 'pick_model', [
+            'product_id' => $b->product_id, 'color' => $b->color_name, 'variant_id' => $b->id, 'quantity' => 1,
+        ]);
+
+        $items = collect($component->get('data.items'));
+        $this->assertCount($a->id === $b->id ? 1 : 2, $items);
+        $this->assertTrue($items->every(fn ($i) => $i['price_type'] === 'wholesale'), 'Con 2 prendas: todo a mayorista');
+
+        // Escanear más de lo que hay en stock no agrega
+        $act($component, 'scan', ['code' => $a->barcode, 'quantity' => 9999]);
+        $this->assertSame($items->sum('quantity'), collect($component->get('data.items'))->sum('quantity'));
+    }
 }

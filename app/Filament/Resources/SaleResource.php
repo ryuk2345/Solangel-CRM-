@@ -334,6 +334,7 @@ class SaleResource extends Resource
                 // 2. DETALLE: PRODUCTOS Y SERVICIOS
                 // ==========================================
                 Forms\Components\Section::make('Detalle de Prendas')
+                    ->key('detalle')
                     ->visible(fn(Get $get) => !$get('is_quick_sale'))
                     ->headerActions([
                         // Lectora de código de barras: escanear agrega la prenda (o suma 1 si ya está)
@@ -367,6 +368,88 @@ class SaleResource extends Resource
                                 if ($inCart + $qty > $stock) {
                                     Notification::make()->title('Stock insuficiente')
                                         ->body("{$variant->display_name}: hay {$stock} en este almacén.")->danger()->send();
+                                    return;
+                                }
+                                if ($existingKey !== false) {
+                                    $items[$existingKey]['quantity'] = $inCart + $qty;
+                                } else {
+                                    $items[(string) \Illuminate\Support\Str::uuid()] = [
+                                        'product_variant_id' => $variant->id,
+                                        'quantity' => $qty,
+                                        'product_name' => $variant->display_name,
+                                        'price' => 0,
+                                    ];
+                                }
+                                $set('items', $items);
+                                \App\Support\SaleCart::recalc($get, $set);
+                            }),
+
+                        // Selector visual: modelo → color → talla (con el stock de cada una)
+                        Forms\Components\Actions\Action::make('pick_model')
+                            ->label('Elegir por modelo')
+                            ->icon('heroicon-o-swatch')
+                            ->color('primary')
+                            ->modalHeading('Elegir prenda por modelo, color y talla')
+                            ->modalSubmitActionLabel('Agregar a la venta')
+                            ->form(function (Get $get) {
+                                $branchId = $get('branch_id');
+                                $warehouseId = \App\Support\SaleCart::warehouseFor($branchId, $get('warehouse_id'));
+
+                                return [
+                                    Forms\Components\Select::make('product_id')
+                                        ->label('Modelo')
+                                        ->searchable()
+                                        ->getSearchResultsUsing(fn (string $search) => \App\Models\Product::query()
+                                            ->where('is_service', false)
+                                            ->whereHas('branches', fn ($b) => $b->where('branches.id', $branchId))
+                                            ->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%"))
+                                            ->limit(30)->get()
+                                            ->mapWithKeys(fn ($p) => [$p->id => $p->name . ' · S/ ' . number_format((float) $p->sale_price, 2)]))
+                                        ->getOptionLabelUsing(fn ($value) => \App\Models\Product::find($value)?->name)
+                                        ->required()
+                                        ->live()
+                                        ->afterStateUpdated(function (Set $set) {
+                                            $set('color', null);
+                                            $set('variant_id', null);
+                                        }),
+                                    Forms\Components\ToggleButtons::make('color')
+                                        ->label('Color')
+                                        ->inline()
+                                        ->visible(fn (Get $get) => filled($get('product_id')))
+                                        ->options(fn (Get $get) => \App\Models\ProductVariant::where('product_id', $get('product_id'))
+                                            ->whereNotNull('color_name')->orderBy('color_id')->pluck('color_name', 'color_name')->unique()->all())
+                                        ->required()
+                                        ->live()
+                                        ->afterStateUpdated(fn (Set $set) => $set('variant_id', null)),
+                                    Forms\Components\ToggleButtons::make('variant_id')
+                                        ->label('Talla (stock en este almacén)')
+                                        ->inline()
+                                        ->visible(fn (Get $get) => filled($get('color')))
+                                        ->options(fn (Get $get) => \App\Models\ProductVariant::with('sizeOption')
+                                            ->where('product_id', $get('product_id'))->where('color_name', $get('color'))
+                                            ->get()->sortBy(fn ($v) => $v->sizeOption?->sort_order ?? 999)
+                                            ->mapWithKeys(fn ($v) => [$v->id => $v->size . ' (' . $v->stockIn($warehouseId) . ')'])
+                                            ->all())
+                                        ->disableOptionWhen(fn (string $value) => (\App\Models\ProductVariant::find($value)?->stockIn($warehouseId) ?? 0) <= 0)
+                                        ->helperText('Las tallas en gris no tienen stock en este almacén.')
+                                        ->required(),
+                                    Forms\Components\TextInput::make('quantity')->label('Cantidad')->numeric()->minValue(1)->default(1)->required(),
+                                ];
+                            })
+                            ->action(function (array $data, Get $get, Set $set) {
+                                $variant = \App\Models\ProductVariant::with('product')->find($data['variant_id']);
+                                if (!$variant) {
+                                    return;
+                                }
+                                $warehouseId = \App\Support\SaleCart::warehouseFor($get('branch_id'), $get('warehouse_id'));
+                                $items = collect($get('items') ?? [])->filter(fn ($i) => !empty($i['product_variant_id']))->all();
+                                $existingKey = collect($items)->search(fn ($i) => (int) $i['product_variant_id'] === $variant->id);
+                                $inCart = $existingKey !== false ? (int) $items[$existingKey]['quantity'] : 0;
+                                $qty = (int) $data['quantity'];
+                                if ($inCart + $qty > $variant->stockIn($warehouseId)) {
+                                    Notification::make()->title('Stock insuficiente')
+                                        ->body("{$variant->display_name}: hay {$variant->stockIn($warehouseId)} en este almacén.")->danger()->send();
+
                                     return;
                                 }
                                 if ($existingKey !== false) {
