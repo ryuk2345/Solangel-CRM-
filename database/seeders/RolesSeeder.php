@@ -88,9 +88,9 @@ class RolesSeeder extends Seeder
                 'stock::movement' => self::READ,
             ], ['page_Dashboard', 'page_StockMatrix', 'page_LowStockReport', 'page_InventoryReport', 'page_PrintLabels', 'widget_LowStockWidget', 'view_cost_price', 'print_labels']),
 
-            // Solo lectura de todo, con exportación (decisión de roles)
+            // Solo lectura de todo, con exportación (decisión de roles), excepto usuarios y roles
             'contador' => $all->filter(fn ($p) => str_starts_with($p, 'view_') || str_starts_with($p, 'page_') || str_starts_with($p, 'widget_'))
-                ->reject(fn ($p) => str_contains($p, '_role') || $p === 'view_any_role')
+                ->reject(fn ($p) => str_contains($p, '_role') || $p === 'view_any_role' || str_contains($p, '_user') || $p === 'view_any_user')
                 ->merge(['export_reports', 'view_cost_price'])
                 ->values()->all(),
         ];
