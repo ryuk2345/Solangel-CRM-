@@ -19,10 +19,10 @@ class StockMatrix extends Page implements HasForms
     use InteractsWithForms;
 
     protected static ?string $navigationIcon = 'heroicon-o-table-cells';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?string $navigationLabel = 'Matriz talla × color';
-    protected static ?string $title = 'Stock por talla y color';
-    protected static ?int $navigationSort = 4;
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
+    protected static ?string $navigationLabel = 'Inventario por talla';
+    protected static ?string $title = 'Inventario por talla';
+    protected static ?int $navigationSort = 2;
     protected static string $view = 'filament.pages.stock-matrix';
 
     public ?array $data = [];

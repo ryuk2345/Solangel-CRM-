@@ -28,8 +28,8 @@ class StockTransferResource extends Resource
     protected static ?string $model = StockTransfer::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-arrows-right-left';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
+    protected static ?int $navigationSort = 4;
     protected static ?string $modelLabel = 'Traspaso de Stock';
     protected static ?string $pluralModelLabel = 'Traspasos de Stock';
 

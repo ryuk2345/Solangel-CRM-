@@ -1,4 +1,6 @@
 <x-filament-panels::page>
+    @include('filament.components.inventory-tabs', ['active' => 'matrix'])
+
     <form wire:submit.prevent>
         {{ $this->form }}
     </form>

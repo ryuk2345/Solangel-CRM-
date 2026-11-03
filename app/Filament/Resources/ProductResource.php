@@ -24,12 +24,12 @@ use Illuminate\Database\Eloquent\Builder;
 class ProductResource extends Resource
 {
     protected static ?string $model = Product::class;
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
     protected static ?string $navigationIcon = 'heroicon-o-shopping-bag';
     protected static ?int $navigationSort = 1;
-    protected static ?string $modelLabel = 'Modelo';
-    protected static ?string $pluralModelLabel = 'Modelos (productos)';
-    protected static ?string $navigationLabel = 'Modelos (productos)';
+    protected static ?string $modelLabel = 'Producto';
+    protected static ?string $pluralModelLabel = 'Productos';
+    protected static ?string $navigationLabel = 'Productos';
     protected static ?string $recordTitleAttribute = 'name';
 
     public static function getGloballySearchableAttributes(): array

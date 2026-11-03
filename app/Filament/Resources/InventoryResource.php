@@ -25,8 +25,9 @@ use Illuminate\Validation\ValidationException;
 class InventoryResource extends Resource
 {
     protected static ?string $model = Inventory::class;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-archive-box';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
     protected static ?int $navigationSort = 2;
     protected static ?string $modelLabel = 'Inventario';
     protected static ?string $pluralModelLabel = 'Inventario';

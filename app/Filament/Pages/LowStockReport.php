@@ -21,12 +21,13 @@ class LowStockReport extends Page implements HasTable
     use HasPageShield;
     use InteractsWithTable;
 
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-exclamation-triangle';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
     protected static ?string $navigationLabel = 'Stock bajo';
     protected static ?string $title = 'Stock bajo y reposición';
     protected static ?int $navigationSort = 5;
-    protected static string $view = 'filament.pages.table-page';
+    protected static string $view = 'filament.pages.low-stock';
 
     protected function baseQuery(): Builder
     {

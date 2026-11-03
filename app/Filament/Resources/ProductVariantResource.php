@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Builder;
 class ProductVariantResource extends Resource
 {
     protected static ?string $model = ProductVariant::class;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-qr-code';
     protected static ?string $navigationGroup = '2. Catálogo e Inventario';
     protected static ?int $navigationSort = 2;

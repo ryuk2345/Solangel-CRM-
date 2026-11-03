@@ -30,12 +30,12 @@ use Illuminate\Validation\ValidationException;
 class PurchaseResource extends Resource
 {
     protected static ?string $model = Purchase::class;
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
     protected static ?string $navigationIcon = 'heroicon-o-truck';
     protected static ?string $navigationLabel = 'Compras';
     protected static ?string $modelLabel = 'Compra';
     protected static ?string $pluralModelLabel = 'Compras';
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 3;
 
     public static function variantLabel(?ProductVariant $v): string
     {

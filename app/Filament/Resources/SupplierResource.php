@@ -13,7 +13,8 @@ use Filament\Tables\Table;
 class SupplierResource extends Resource
 {
     protected static ?string $model = Supplier::class;
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
+    protected static bool $shouldRegisterNavigation = false;
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
     protected static ?string $navigationIcon = 'heroicon-o-building-office-2';
     protected static ?string $navigationLabel = 'Proveedores';
     protected static ?string $modelLabel = 'Proveedor';
