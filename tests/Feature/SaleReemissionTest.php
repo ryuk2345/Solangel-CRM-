@@ -15,14 +15,16 @@ use App\Models\User;
 use App\Services\SaleReemissionService;
 use App\Services\SunatService;
 use Carbon\Carbon;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 class SaleReemissionTest extends TestCase
 {
-    use DatabaseTransactions;
+    use RefreshDatabase;
+
+    protected bool $seed = true;
 
     protected User $adminUser;
     protected User $vendedorUser;
@@ -39,11 +41,16 @@ class SaleReemissionTest extends TestCase
         $this->assertEquals(1, (int)$setting->sunat_sandbox, 'sunat_sandbox debe ser 1 para ejecutar pruebas.');
 
         $this->adminUser = User::whereHas('roles', fn ($q) => $q->where('name', 'super_admin'))->firstOrFail();
+        $this->seed(\Database\Seeders\DemoDataSeeder::class);
         $this->vendedorUser = User::whereHas('roles', fn ($q) => $q->where('name', 'vendedor'))->firstOrFail();
         $this->branch = Branch::find(1) ?? Branch::firstOrFail();
         $this->branch->update(['sunat_code' => '0000']);
 
-        $branch2 = Branch::find(2);
+        // Segunda tienda para las pruebas de dos anexos SUNAT
+        $branch2 = Branch::find(2) ?? Branch::create(['id' => 2, 'name' => 'Tienda 2', 'sunat_code' => '0002', 'is_active' => true]);
+        if (!\App\Models\Warehouse::where('branch_id', 2)->exists()) {
+            \App\Models\Warehouse::create(['branch_id' => 2, 'name' => 'Almacén Tienda 2', 'is_default' => true, 'is_active' => true]);
+        }
         if ($branch2) {
             $branch2->update(['sunat_code' => '0002']);
             Serie::firstOrCreate(
@@ -57,6 +64,15 @@ class SaleReemissionTest extends TestCase
         }
 
         $this->customer = Customer::whereRaw('LENGTH(TRIM(document_number)) = 11')->first() ?? Customer::firstOrFail();
+    }
+
+    /** Estas pruebas envían a SUNAT beta: necesitan la extensión SOAP y un certificado configurado. */
+    private function requiereSunatBeta(): void
+    {
+        $cert = CompanySetting::first()?->cert_path;
+        if (!class_exists(\SoapClient::class) || blank($cert) || !Storage::exists($cert)) {
+            $this->markTestSkipped('Requiere la extensión SOAP de PHP y el certificado digital de pruebas para conectarse a SUNAT beta.');
+        }
     }
 
     /**
@@ -443,7 +459,8 @@ class SaleReemissionTest extends TestCase
      */
     public function test_venta_con_descripcion_unida_mayor_a_255_caracteres_no_se_corta_ni_reemite(): void
     {
-        $genericVariant = ProductVariant::where('sku', 'REPE-GENERICO')->firstOrFail();
+        // Línea de texto: en moda es un servicio (delivery); el 'repuesto genérico' de Mangui ya no existe
+        $genericVariant = ProductVariant::whereHas('product', fn ($p) => $p->where('is_service', true))->firstOrFail();
 
         $sale = Sale::create([
             'customer_id'      => $this->customer->id,
@@ -556,10 +573,12 @@ class SaleReemissionTest extends TestCase
      */
     public function test_venta_pendiente_con_linea_en_cero_pasa_texto_y_sunat_la_acepta_en_ambas_tiendas(): void
     {
-        $genericVariant = ProductVariant::where('sku', 'REPE-GENERICO')->firstOrFail();
+        $this->requiereSunatBeta();
+        // Línea de texto: en moda es un servicio (delivery); el 'repuesto genérico' de Mangui ya no existe
+        $genericVariant = ProductVariant::whereHas('product', fn ($p) => $p->where('is_service', true))->firstOrFail();
 
         $branches = [
-            1 => ['expected_annex' => '0000', 'expected_serie' => 'F020'],
+            1 => ['expected_annex' => '0000', 'expected_serie' => 'F001'],
             2 => ['expected_annex' => '0002', 'expected_serie' => 'F021'],
         ];
 
@@ -673,10 +692,12 @@ class SaleReemissionTest extends TestCase
      */
     public function test_venta_rechazada_se_reemite_con_serie_y_codigo_anexo_de_su_tienda_en_ambas_tiendas(): void
     {
-        $genericVariant = ProductVariant::where('sku', 'REPE-GENERICO')->firstOrFail();
+        $this->requiereSunatBeta();
+        // Línea de texto: en moda es un servicio (delivery); el 'repuesto genérico' de Mangui ya no existe
+        $genericVariant = ProductVariant::whereHas('product', fn ($p) => $p->where('is_service', true))->firstOrFail();
 
         $branches = [
-            1 => ['expected_annex' => '0000', 'expected_serie' => 'F020', 'old_correlative' => 88123],
+            1 => ['expected_annex' => '0000', 'expected_serie' => 'F001', 'old_correlative' => 88123],
             2 => ['expected_annex' => '0002', 'expected_serie' => 'F021', 'old_correlative' => 88123],
         ];
 

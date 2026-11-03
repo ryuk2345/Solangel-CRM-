@@ -47,7 +47,7 @@ class InitialSetupSeeder extends Seeder
                 'branch_id'      => $branchId,
                 'document_type'  => $s['document_type'],
                 'serie'          => $s['serie'],
-                'current_number' => 0,
+                'current_number' => 1, // siguiente número a emitir (el sistema usa este y luego incrementa)
                 'is_active'      => true,
                 'created_at'     => now(),
                 'updated_at'     => now(),
