@@ -15,7 +15,8 @@ use Illuminate\Database\Eloquent\Builder;
 class CustomerPaymentResource extends Resource
 {
     protected static ?string $model = CustomerPayment::class;
-    protected static ?string $navigationGroup = '1. Ventas y Cajas';
+    protected static bool $shouldRegisterNavigation = false;
+    protected static ?string $navigationGroup = 'Ventas y cajas';
     protected static ?string $navigationIcon = 'heroicon-o-banknotes';
     protected static ?string $navigationLabel = 'Abonos';
     protected static ?string $modelLabel = 'Abono';

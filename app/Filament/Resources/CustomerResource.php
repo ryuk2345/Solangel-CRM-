@@ -20,7 +20,8 @@ class CustomerResource extends Resource
     protected static ?string $modelLabel = 'Cliente';
     protected static ?string $pluralModelLabel = 'Clientes';
     protected static ?string $navigationIcon = 'heroicon-o-user-group';
-    protected static ?string $navigationGroup = '1. Ventas y Cajas'; // Respetando tu grupo organizado
+    protected static ?string $navigationGroup = 'Ventas y cajas';
+    protected static ?int $navigationSort = 4;
 
     public static function form(Form $form): Form
     {
@@ -198,7 +199,8 @@ class CustomerResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            RelationManagers\SalesRelationManager::class,
+            RelationManagers\PaymentsRelationManager::class,
         ];
     }
 

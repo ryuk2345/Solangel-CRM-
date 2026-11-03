@@ -24,30 +24,9 @@ class SaleResource extends Resource
     protected static ?string $model = Sale::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-shopping-cart';
-    protected static ?string $navigationGroup = '1. Ventas y Cajas'; 
-    protected static ?int $navigationSort = 1; 
+    protected static ?string $navigationGroup = 'Ventas y cajas'; 
+    protected static ?int $navigationSort = 2; 
     protected static ?string $modelLabel = 'Venta';
-
-    public static function getNavigationItems(): array
-    {
-        return [
-            NavigationItem::make(static::getNavigationLabel())
-                ->group(static::getNavigationGroup())
-                ->icon(static::getNavigationIcon())
-                ->activeIcon(static::getActiveNavigationIcon())
-                ->isActiveWhen(fn () => request()->routeIs(static::getRouteBaseName() . '.*') && !request()->has('tableFilters.con_notas') && !request()->has('con_notas'))
-                ->sort(static::getNavigationSort())
-                ->badge(static::getNavigationBadge(), color: static::getNavigationBadgeColor())
-                ->url(static::getUrl()),
-
-            NavigationItem::make('Notas de Crédito y Débito')
-                ->group(static::getNavigationGroup())
-                ->icon('heroicon-o-document-duplicate')
-                ->isActiveWhen(fn () => request()->routeIs(static::getRouteBaseName() . '.*') && (request()->input('tableFilters.con_notas.isActive') == 'true' || request()->input('tableFilters.con_notas.isActive') == '1' || request()->boolean('con_notas')))
-                ->sort((static::getNavigationSort() ?? 1) + 1)
-                ->url(static::getUrl('index', ['tableFilters[con_notas][isActive]' => 'true'])),
-        ];
-    }
 
     public static function form(Form $form): Form
     {

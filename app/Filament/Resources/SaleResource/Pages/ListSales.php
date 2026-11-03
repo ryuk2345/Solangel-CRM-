@@ -2,10 +2,15 @@
 
 namespace App\Filament\Resources\SaleResource\Pages;
 
+use App\Filament\Resources\QuotationResource;
 use App\Filament\Resources\SaleResource;
+use App\Filament\Resources\WholesalePriceRequestResource;
+use App\Models\Quotation;
+use App\Models\Sale;
+use App\Models\WholesalePriceRequest;
 use Filament\Actions;
-use Filament\Resources\Pages\ListRecords;
 use Filament\Resources\Components\Tab;
+use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
 
 class ListSales extends ListRecords
@@ -14,8 +19,26 @@ class ListSales extends ListRecords
 
     protected function getHeaderActions(): array
     {
+        $pendingApprovals = WholesalePriceRequest::where('status', 'pendiente')->count();
+
         return [
-            Actions\CreateAction::make(),
+            Actions\Action::make('wholesale_requests')
+                ->label('Aprobaciones de precio')
+                ->icon('heroicon-o-shield-check')
+                ->color($pendingApprovals > 0 ? 'warning' : 'gray')
+                ->badge($pendingApprovals > 0 ? (string) $pendingApprovals : null)
+                ->badgeColor('warning')
+                ->url(fn () => WholesalePriceRequestResource::getUrl('index'))
+                ->visible(fn () => auth()->user()?->can('view_any_wholesale::price::request') ?? false),
+
+            Actions\Action::make('create_quotation')
+                ->label('Nueva cotización')
+                ->icon('heroicon-o-document-text')
+                ->color('gray')
+                ->url(fn () => QuotationResource::getUrl('create'))
+                ->visible(fn () => auth()->user()?->can('create_quotation') ?? false),
+
+            Actions\CreateAction::make()->label('Nueva venta'),
         ];
     }
 
@@ -23,46 +46,57 @@ class ListSales extends ListRecords
     {
         parent::mount();
 
-        if (request()->boolean('con_notas')) {
-            $this->tableFilters['con_notas'] = ['isActive' => true];
+        if (request()->filled('activeTab')) {
+            $this->activeTab = request()->query('activeTab');
+        } elseif (request()->boolean('con_notas')) {
+            $this->activeTab = 'con_notas';
         }
     }
 
-    // 🌟 ESTA ES LA MAGIA DE LAS PESTAÑAS 🌟
     public function getTabs(): array
     {
         $isSuperAdmin = auth()->user()?->seesAllBranches();
         $userBranchId = auth()->user()?->branch_id ?? 1;
 
-        $countQuery = fn (string $prefix) => \App\Models\Sale::where('serie', 'like', $prefix)
+        $creditCount = Sale::where('payment_condition', 'credito')
+            ->where('credit_balance', '>', 0)
+            ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
+            ->when(!$isSuperAdmin, fn ($q) => $q->where('branch_id', $userBranchId))
+            ->count();
+
+        $notesCount = Sale::where(fn ($q) => $q->whereNotNull('credit_note_serie')->orWhere('sunat_status', 'anulado'))
+            ->when(!$isSuperAdmin, fn ($q) => $q->where('branch_id', $userBranchId))
+            ->count();
+
+        $quoteCount = Quotation::where('status', 'pendiente')
             ->when(!$isSuperAdmin, fn ($q) => $q->where('branch_id', $userBranchId))
             ->count();
 
         return [
-            'todos' => Tab::make('Todos los Comprobantes'),
-            
-            'boletas' => Tab::make('Boletas')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('serie', 'like', 'B%'))
-                ->badge($countQuery('B%')),
+            'todas' => Tab::make('Todas'),
 
-            'facturas' => Tab::make('Facturas')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('serie', 'like', 'F%'))
-                ->badge($countQuery('F%'))
-                ->badgeColor('info'),
+            'por_cobrar' => Tab::make('Por cobrar')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('payment_condition', 'credito')
+                    ->where('credit_balance', '>', 0)
+                    ->whereNotIn('sunat_status', ['anulado', 'rechazado']))
+                ->badge($creditCount ?: null)
+                ->badgeColor('warning'),
 
-            'notas' => Tab::make('Notas de Venta')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('serie', 'like', 'NV%'))
-                ->badge($countQuery('NV%'))
-                ->badgeColor('gray'),
-
-            'rechazados' => Tab::make('Rechazados SUNAT')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('sunat_status', 'rechazado'))
-                ->badge(
-                    \App\Models\Sale::where('sunat_status', 'rechazado')
-                        ->when(!$isSuperAdmin, fn ($q) => $q->where('branch_id', $userBranchId))
-                        ->count()
-                )
+            'con_notas' => Tab::make('Con nota de crédito')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where(fn ($q) => $q->whereNotNull('credit_note_serie')->orWhere('sunat_status', 'anulado')))
+                ->badge($notesCount ?: null)
                 ->badgeColor('danger'),
+
+            'cotizaciones' => Tab::make('Cotizaciones')
+                ->badge($quoteCount ?: null)
+                ->badgeColor('info'),
         ];
+    }
+
+    public function updatedActiveTab(): void
+    {
+        if ($this->activeTab === 'cotizaciones') {
+            $this->redirect(QuotationResource::getUrl());
+        }
     }
 }

@@ -19,9 +19,9 @@ use Illuminate\Database\Eloquent\Builder;
 class QuotationResource extends Resource
 {
     protected static ?string $model = Quotation::class;
-
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationIcon = 'heroicon-o-document-text';
-    protected static ?string $navigationGroup = '1. Ventas y Cajas'; 
+    protected static ?string $navigationGroup = 'Ventas y cajas'; 
     protected static ?int $navigationSort = 2; 
     protected static ?string $modelLabel = 'Cotización';
     protected static ?string $pluralModelLabel = 'Cotizaciones';

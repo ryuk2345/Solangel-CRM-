@@ -20,8 +20,8 @@ use Illuminate\Validation\ValidationException;
 class WholesalePriceRequestResource extends Resource
 {
     protected static ?string $model = WholesalePriceRequest::class;
-
-    protected static ?string $navigationGroup = '1. Ventas y Cajas';
+    protected static bool $shouldRegisterNavigation = false;
+    protected static ?string $navigationGroup = 'Ventas y cajas';
     protected static ?string $navigationIcon = 'heroicon-o-shield-check';
     protected static ?string $navigationLabel = 'Aprobaciones de precio';
     protected static ?string $modelLabel = 'Aprobación de precio mayorista';

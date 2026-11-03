@@ -16,9 +16,9 @@ class CashRegisterResource extends Resource
 {
     protected static ?string $model = CashRegister::class;
 
-   protected static ?string $navigationIcon = 'heroicon-o-banknotes';
-    protected static ?string $navigationGroup = '1. Ventas y Cajas';
-    protected static ?int $navigationSort = 2; // <-- 2do lugar
+    protected static ?string $navigationIcon = 'heroicon-o-banknotes';
+    protected static ?string $navigationGroup = 'Ventas y cajas';
+    protected static ?int $navigationSort = 3;
     protected static ?string $modelLabel = 'Caja';
 
     /**

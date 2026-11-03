@@ -15,12 +15,12 @@ use Illuminate\Database\Eloquent\Builder;
 class SaleReturnResource extends Resource
 {
     protected static ?string $model = SaleReturn::class;
-    protected static ?string $navigationGroup = '1. Ventas y Cajas';
+    protected static ?string $navigationGroup = 'Ventas y cajas';
     protected static ?string $navigationIcon = 'heroicon-o-arrows-right-left';
     protected static ?string $navigationLabel = 'Cambios y devoluciones';
     protected static ?string $modelLabel = 'Cambio o devolución';
     protected static ?string $pluralModelLabel = 'Cambios y devoluciones';
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 5;
 
     public static function canCreate(): bool
     {
