@@ -1690,7 +1690,7 @@ class SaleResource extends Resource
             ->label('Registrar abono')
             ->icon('heroicon-o-banknotes')
             ->color('success')
-            ->visible(fn (Sale $record) => (float) $record->credit_balance > 0 && auth()->user()?->can('create_customer::payment'))
+            ->visible(fn (Sale $record) => (float) $record->credit_balance > 0 && (auth()->user()?->can('create_customer::payment') || auth()->user()?->can('manage_credit')))
             ->modalHeading(fn (Sale $record) => "Abono a {$record->serie}-{$record->correlative}")
             ->modalDescription(fn (Sale $record) => 'Saldo pendiente: S/ ' . number_format((float) $record->credit_balance, 2)
                 . ($record->due_date ? ' · vence ' . $record->due_date->format('d/m/Y') : ''))

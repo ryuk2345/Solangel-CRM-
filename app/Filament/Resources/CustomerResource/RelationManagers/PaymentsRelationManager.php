@@ -37,7 +37,7 @@ class PaymentsRelationManager extends RelationManager
                     ->label('Registrar abono')
                     ->icon('heroicon-o-banknotes')
                     ->color('success')
-                    ->visible(fn () => $customer->sales()->where('credit_balance', '>', 0)->exists() && (auth()->user()?->can('create_customer::payment') ?? false))
+                    ->visible(fn () => $customer->sales()->where('credit_balance', '>', 0)->exists() && (auth()->user()?->can('create_customer::payment') || auth()->user()?->can('manage_credit')))
                     ->form([
                         Forms\Components\Select::make('sale_id')
                             ->label('Venta a crédito')

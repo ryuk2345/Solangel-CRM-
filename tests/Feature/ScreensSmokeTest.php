@@ -77,10 +77,8 @@ class ScreensSmokeTest extends TestCase
             Pages\AccountsReceivable::class,
             Pages\SalesReport::class,
             Pages\InventoryReport::class,
-            Resources\CustomerPaymentResource\Pages\ListCustomerPayments::class,
-            Pages\AccountsReceivable::class,
-            Pages\SalesReport::class,
-            Pages\InventoryReport::class,
+            Resources\UserResource\Pages\ListUsers::class,
+            \BezhanSalleh\FilamentShield\Resources\RoleResource\Pages\ListRoles::class,
             Resources\CustomerResource\Pages\CreateCustomer::class,
             Resources\CustomerResource\Pages\ListCustomers::class,
             Resources\StockTransferResource\Pages\ListStockTransfers::class,
@@ -280,5 +278,29 @@ class ScreensSmokeTest extends TestCase
             'ownerRecord' => $mayorista,
             'pageClass' => Resources\CustomerResource\Pages\EditCustomer::class,
         ])->assertOk();
+    }
+
+    public function test_clusters_y_pantallas_de_configuracion_abren_bien(): void
+    {
+        Livewire::test(Resources\UserResource\Pages\ListUsers::class)->assertOk();
+        Livewire::test(\BezhanSalleh\FilamentShield\Resources\RoleResource\Pages\ListRoles::class)->assertOk();
+        Livewire::test(Resources\CategoryResource\Pages\ListCategories::class)->assertOk();
+        Livewire::test(Resources\BrandResource\Pages\ManageBrands::class)->assertOk();
+        Livewire::test(Resources\ColorResource\Pages\ManageColors::class)->assertOk();
+        Livewire::test(Resources\SizeResource\Pages\ManageSizes::class)->assertOk();
+        Livewire::test(Resources\SeasonResource\Pages\ManageSeasons::class)->assertOk();
+        Livewire::test(Resources\SizeCurveResource\Pages\ManageSizeCurves::class)->assertOk();
+        Livewire::test(Resources\ServiceResource\Pages\ListServices::class)->assertOk();
+        Livewire::test(Resources\SerieResource\Pages\ListSeries::class)->assertOk();
+        Livewire::test(Resources\CompanySettingResource\Pages\EditCompanySetting::class, [
+            'record' => \App\Models\CompanySetting::value('id'),
+        ])->assertOk();
+
+        // Cluster URLs y subpáginas para el administrador
+        $this->get('/admin/users-and-roles')->assertRedirect();
+        $this->get('/admin/users-and-roles/users')->assertOk();
+        $this->get('/admin/users-and-roles/shield/roles')->assertOk();
+        $this->get('/admin/catalogs')->assertRedirect();
+        $this->get('/admin/company-and-sunat')->assertRedirect();
     }
 }
