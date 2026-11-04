@@ -114,8 +114,16 @@ class SaleExchangeService
                     'total' => round($unit * $qty, 2),
                 ]);
 
-                StockService::move((int) $item->product_variant_id, $warehouseId, $qty, 'exchange_in', $return,
-                    ($type === 'cambio' ? 'Cambio' : 'Devolución') . " de {$sale->serie}-{$sale->correlative}");
+                StockService::move(
+                    (int) $item->product_variant_id,
+                    $warehouseId,
+                    $qty,
+                    'exchange_in',
+                    $return,
+                    ($type === 'cambio' ? 'Cambio' : 'Devolución') . " de {$sale->serie}-{$sale->correlative}",
+                    null,
+                    "{$sale->serie}-{$sale->correlative}",
+                );
             }
 
             return $return;

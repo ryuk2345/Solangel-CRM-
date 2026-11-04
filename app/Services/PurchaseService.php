@@ -103,7 +103,17 @@ class PurchaseService
                     'total' => round($line['quantity'] * $line['unit_cost'], 2),
                 ]);
 
-                StockService::move($line['product_variant_id'], $warehouse->id, $line['quantity'], 'purchase', $purchase, $purchase->reference_label);
+                StockService::move(
+                    $line['product_variant_id'],
+                    $warehouse->id,
+                    $line['quantity'],
+                    'purchase',
+                    $purchase,
+                    $purchase->reference_label,
+                    (float) $line['unit_cost'],
+                    $purchase->document_number,
+                    $header['guide_document'] ?? null,
+                );
 
                 // La variante queda con el último costo de compra (si se indicó)
                 if ($line['unit_cost'] > 0) {
@@ -135,6 +145,8 @@ class PurchaseService
                     'purchase_void',
                     $purchase,
                     'Anulación ' . $purchase->reference_label . ($reason ? ": {$reason}" : ''),
+                    (float) $item->unit_cost,
+                    $purchase->document_number,
                 );
             }
 

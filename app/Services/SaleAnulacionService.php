@@ -250,6 +250,8 @@ class SaleAnulacionService
                 'sale_void',
                 $sale,
                 "Anulación {$sale->serie}-{$sale->correlative}",
+                null,
+                "{$sale->serie}-{$sale->correlative}",
             );
         }
     }

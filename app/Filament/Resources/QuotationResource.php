@@ -580,6 +580,8 @@ class QuotationResource extends Resource
                                         'sale',
                                         $sale,
                                         "Venta {$sale->serie}-{$sale->correlative} (cotización)",
+                                        null,
+                                        "{$sale->serie}-{$sale->correlative}",
                                     );
                                 }
                             }

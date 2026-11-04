@@ -475,7 +475,8 @@ class StockTransferResource extends Resource
                                 ]);
 
                                 if ($receivedQty > 0) {
-                                    \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->destination_warehouse_id, (int) $receivedQty, 'transfer_in', $locked, "Recepción traspaso {$locked->number}");
+                                    $guideDoc = $locked->despatch?->document_number ?? $locked->number;
+                                    \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->destination_warehouse_id, (int) $receivedQty, 'transfer_in', $locked, "Recepción traspaso {$locked->number}", null, null, $guideDoc);
                                 }
                             }
 
@@ -525,8 +526,9 @@ class StockTransferResource extends Resource
                                 return;
                             }
 
+                            $guideDoc = $locked->despatch?->document_number ?? $locked->number;
                             foreach ($locked->items as $item) {
-                                \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->origin_warehouse_id, (int) $item->quantity_sent, 'transfer_return', $locked, "Traspaso anulado {$locked->number}");
+                                \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->origin_warehouse_id, (int) $item->quantity_sent, 'transfer_return', $locked, "Traspaso anulado {$locked->number}", null, null, $guideDoc);
                             }
 
                             $locked->update([

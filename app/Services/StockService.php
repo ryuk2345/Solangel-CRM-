@@ -21,9 +21,18 @@ class StockService
      *
      * @throws ValidationException si la salida deja el stock en negativo.
      */
-    public static function move(int $variantId, int $warehouseId, int $quantity, string $type, ?Model $reference = null, ?string $note = null): StockMovement
-    {
-        return DB::transaction(function () use ($variantId, $warehouseId, $quantity, $type, $reference, $note) {
+    public static function move(
+        int $variantId,
+        int $warehouseId,
+        int $quantity,
+        string $type,
+        ?Model $reference = null,
+        ?string $note = null,
+        ?float $unitCost = null,
+        ?string $paymentDocument = null,
+        ?string $guideDocument = null,
+    ): StockMovement {
+        return DB::transaction(function () use ($variantId, $warehouseId, $quantity, $type, $reference, $note, $unitCost, $paymentDocument, $guideDocument) {
             $inventory = Inventory::where('product_variant_id', $variantId)
                 ->where('warehouse_id', $warehouseId)
                 ->lockForUpdate()
@@ -53,6 +62,60 @@ class StockService
                 ]);
             }
 
+            // Último movimiento para obtener el saldo anterior y el costo promedio móvil vigente
+            $lastMovement = StockMovement::where('product_variant_id', $variantId)
+                ->where('warehouse_id', $warehouseId)
+                ->latest('id')
+                ->first();
+
+            $prevBalanceQty = $lastMovement ? (int) $lastMovement->balance_after : (int) $inventory->stock;
+            $prevBalanceCost = $lastMovement ? (float) $lastMovement->balance_total_cost : 0.0;
+            $prevUnitCost = $lastMovement && $prevBalanceQty > 0 ? (float) $lastMovement->balance_unit_cost : 0.0;
+
+            $variant = ProductVariant::with('product')->find($variantId);
+            $defaultCost = (float) ($variant?->purchase_price ?: ($variant?->product?->purchase_price ?: 0.0));
+
+            // Reglas de valorización (método promedio ponderado móvil según §3.2)
+            $calcUnitCost = 0.0;
+            $calcTotalCost = 0.0;
+            $newBalanceCost = 0.0;
+            $newBalanceUnitCost = 0.0;
+
+            if ($type === 'purchase') {
+                $calcUnitCost = $unitCost !== null && $unitCost > 0 ? (float) $unitCost : ($prevUnitCost ?: $defaultCost);
+                $calcTotalCost = round($quantity * $calcUnitCost, 2);
+                $newBalanceCost = round($prevBalanceCost + $calcTotalCost, 2);
+                $newBalanceUnitCost = $newStock > 0 ? round($newBalanceCost / $newStock, 4) : 0.0;
+            } elseif ($type === 'purchase_void') {
+                $calcUnitCost = $unitCost !== null && $unitCost > 0 ? (float) $unitCost : ($prevUnitCost ?: $defaultCost);
+                $calcTotalCost = round($quantity * $calcUnitCost, 2); // quantity negativo
+                $newBalanceCost = round($prevBalanceCost + $calcTotalCost, 2);
+                $newBalanceUnitCost = $newStock > 0 ? round($newBalanceCost / $newStock, 4) : 0.0;
+            } elseif (in_array($type, ['initial', 'transfer_in', 'transfer_return']) || ($type === 'adjustment' && $quantity > 0)) {
+                $calcUnitCost = $unitCost !== null && $unitCost > 0 ? (float) $unitCost : ($prevUnitCost ?: $defaultCost);
+                $calcTotalCost = round($quantity * $calcUnitCost, 2);
+                $newBalanceCost = round($prevBalanceCost + $calcTotalCost, 2);
+                $newBalanceUnitCost = $newStock > 0 ? round($newBalanceCost / $newStock, 4) : 0.0;
+            } elseif (in_array($type, ['sale_void', 'exchange_in'])) {
+                // Devolución por cliente / anulación de venta (salida negativa en el Kardex)
+                $calcUnitCost = $unitCost !== null && $unitCost > 0 ? (float) $unitCost : ($prevUnitCost ?: $defaultCost);
+                $calcTotalCost = round($quantity * $calcUnitCost, 2);
+                $newBalanceCost = round($prevBalanceCost + $calcTotalCost, 2);
+                $newBalanceUnitCost = $newStock > 0 ? round($newBalanceCost / $newStock, 4) : 0.0;
+            } else {
+                // Salidas: sale, transfer_out, exchange_out, o adjustment < 0
+                // Mantienen el costo promedio vigente
+                $calcUnitCost = $prevUnitCost > 0 ? $prevUnitCost : ($unitCost !== null && $unitCost > 0 ? (float) $unitCost : $defaultCost);
+                $calcTotalCost = round($quantity * $calcUnitCost, 2); // quantity es negativo
+                $newBalanceCost = round($prevBalanceCost + $calcTotalCost, 2);
+                $newBalanceUnitCost = $newStock > 0 ? $calcUnitCost : 0.0;
+            }
+
+            if ($newStock <= 0) {
+                $newBalanceCost = 0.0;
+                $newBalanceUnitCost = 0.0;
+            }
+
             $inventory->update(['stock' => $newStock]);
 
             return StockMovement::create([
@@ -60,17 +123,23 @@ class StockService
                 'product_variant_id' => $variantId,
                 'type' => $type,
                 'quantity' => $quantity,
+                'unit_cost' => $calcUnitCost,
+                'total_cost' => $calcTotalCost,
                 'balance_after' => $newStock,
+                'balance_unit_cost' => $newBalanceUnitCost,
+                'balance_total_cost' => $newBalanceCost,
                 'reference_type' => $reference?->getMorphClass(),
                 'reference_id' => $reference?->getKey(),
                 'user_id' => auth()->id(),
                 'note' => $note,
+                'guide_document' => $guideDocument,
+                'payment_document' => $paymentDocument,
             ]);
         });
     }
 
     /** Fija el stock a una cantidad contada (ajuste de inventario). */
-    public static function setTo(int $variantId, int $warehouseId, int $countedQuantity, ?string $note = null): ?StockMovement
+    public static function setTo(int $variantId, int $warehouseId, int $countedQuantity, ?string $note = null, ?float $unitCost = null): ?StockMovement
     {
         if ($countedQuantity < 0) {
             throw ValidationException::withMessages(['stock' => 'El stock contado no puede ser negativo.']);
@@ -79,7 +148,7 @@ class StockService
         $current = self::available($variantId, $warehouseId);
         $diff = $countedQuantity - $current;
 
-        return $diff === 0 ? null : self::move($variantId, $warehouseId, $diff, 'adjustment', null, $note);
+        return $diff === 0 ? null : self::move($variantId, $warehouseId, $diff, 'adjustment', null, $note, $unitCost);
     }
 
     public static function available(int $variantId, int $warehouseId): int

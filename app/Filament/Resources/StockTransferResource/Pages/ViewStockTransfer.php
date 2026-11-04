@@ -89,7 +89,8 @@ class ViewStockTransfer extends ViewRecord
                             ]);
 
                             if ($receivedQty > 0) {
-                                \App\Services\StockService::move((int) $item->product_variant_id, (int) $lockedTransfer->destination_warehouse_id, (int) $receivedQty, 'transfer_in', $lockedTransfer, "Recepción traspaso {$lockedTransfer->number}");
+                                $guideDoc = $lockedTransfer->despatch?->document_number ?? $lockedTransfer->number;
+                                \App\Services\StockService::move((int) $item->product_variant_id, (int) $lockedTransfer->destination_warehouse_id, (int) $receivedQty, 'transfer_in', $lockedTransfer, "Recepción traspaso {$lockedTransfer->number}", null, null, $guideDoc);
                             }
                         }
 
@@ -146,8 +147,9 @@ class ViewStockTransfer extends ViewRecord
                         }
 
                         // Devolver stock al almacén de origen
+                        $guideDoc = $lockedTransfer->despatch?->document_number ?? $lockedTransfer->number;
                         foreach ($lockedTransfer->items as $item) {
-                            \App\Services\StockService::move((int) $item->product_variant_id, (int) $lockedTransfer->origin_warehouse_id, (int) $item->quantity_sent, 'transfer_return', $lockedTransfer, "Traspaso anulado {$lockedTransfer->number}");
+                            \App\Services\StockService::move((int) $item->product_variant_id, (int) $lockedTransfer->origin_warehouse_id, (int) $item->quantity_sent, 'transfer_return', $lockedTransfer, "Traspaso anulado {$lockedTransfer->number}", null, null, $guideDoc);
                         }
 
                         $lockedTransfer->update([

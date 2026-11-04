@@ -488,6 +488,8 @@ class CreateSale extends CreateRecord
                     'sale',
                     $venta,
                     "Venta {$venta->serie}-{$venta->correlative}",
+                    null,
+                    "{$venta->serie}-{$venta->correlative}",
                 );
             }
         } catch (\Illuminate\Validation\ValidationException $e) {

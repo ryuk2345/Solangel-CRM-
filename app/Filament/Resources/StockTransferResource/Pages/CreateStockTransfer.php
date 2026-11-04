@@ -139,11 +139,12 @@ class CreateStockTransfer extends CreateRecord
             }
 
             // 4. Mover el stock por el kardex (salida del origen; entrada inmediata si es interno)
+            $guideDoc = $transfer->despatch?->document_number ?? $transfer->number;
             foreach ($itemsData as $item) {
                 $qtySent = (int) $item['quantity_sent'];
-                \App\Services\StockService::move((int) $item['product_variant_id'], (int) $originWarehouseId, -$qtySent, 'transfer_out', $transfer, "Traspaso {$transfer->number}");
+                \App\Services\StockService::move((int) $item['product_variant_id'], (int) $originWarehouseId, -$qtySent, 'transfer_out', $transfer, "Traspaso {$transfer->number}", null, null, $guideDoc);
                 if ($isInterno) {
-                    \App\Services\StockService::move((int) $item['product_variant_id'], (int) $destWarehouseId, $qtySent, 'transfer_in', $transfer, "Traspaso {$transfer->number}");
+                    \App\Services\StockService::move((int) $item['product_variant_id'], (int) $destWarehouseId, $qtySent, 'transfer_in', $transfer, "Traspaso {$transfer->number}", null, null, $guideDoc);
                 }
             }
 
