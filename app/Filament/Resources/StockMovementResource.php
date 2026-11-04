@@ -15,11 +15,12 @@ use Illuminate\Database\Eloquent\Builder;
 class StockMovementResource extends Resource
 {
     protected static ?string $model = StockMovement::class;
+    protected static bool $shouldRegisterNavigation = false;
     protected static ?string $navigationGroup = 'Administración';
     protected static ?string $navigationIcon = 'heroicon-o-arrows-right-left';
-    protected static ?string $navigationLabel = 'Kardex';
+    protected static ?string $navigationLabel = 'Movimientos de Stock';
     protected static ?string $modelLabel = 'Movimiento de stock';
-    protected static ?string $pluralModelLabel = 'Kardex';
+    protected static ?string $pluralModelLabel = 'Movimientos';
     protected static ?int $navigationSort = 3;
 
     public static function canCreate(): bool
@@ -41,11 +42,21 @@ class StockMovementResource extends Resource
                         ->where('sku', 'like', "%{$search}%")->orWhere('barcode', $search)
                         ->orWhereHas('product', fn ($p) => $p->where('name', 'like', "%{$search}%")))),
                 Tables\Columns\TextColumn::make('warehouse.name')->label('Almacén'),
+                Tables\Columns\TextColumn::make('payment_document')->label('Comprobante')->placeholder('----')->searchable(),
+                Tables\Columns\TextColumn::make('guide_document')->label('Guía')->placeholder('----')->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('quantity')->label('Cantidad')
                     ->formatStateUsing(fn ($state) => ($state > 0 ? '+' : '') . $state)
                     ->color(fn ($state) => $state >= 0 ? 'success' : 'danger')
                     ->weight('bold')
                     ->alignEnd(),
+                Tables\Columns\TextColumn::make('unit_cost')->label('P.U. (S/)')
+                    ->formatStateUsing(fn ($state) => number_format((float) $state, 4))
+                    ->alignEnd()
+                    ->visible(fn () => auth()->user()?->seesAllBranches() || auth()->user()?->hasRole(['super_admin', 'administrador', 'contador'])),
+                Tables\Columns\TextColumn::make('total_cost')->label('P.T. (S/)')
+                    ->formatStateUsing(fn ($state) => number_format((float) $state, 2))
+                    ->alignEnd()
+                    ->visible(fn () => auth()->user()?->seesAllBranches() || auth()->user()?->hasRole(['super_admin', 'administrador', 'contador'])),
                 Tables\Columns\TextColumn::make('balance_after')->label('Saldo')->alignEnd(),
                 Tables\Columns\TextColumn::make('note')->label('Referencia / motivo')->wrap(),
                 Tables\Columns\TextColumn::make('user.name')->label('Usuario')->toggleable(),

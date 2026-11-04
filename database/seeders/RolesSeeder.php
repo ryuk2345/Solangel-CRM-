@@ -86,7 +86,7 @@ class RolesSeeder extends Seeder
                 'size' => self::READ,
                 'size::curve' => self::READ,
                 'stock::movement' => self::READ,
-            ], ['page_Dashboard', 'page_StockMatrix', 'page_LowStockReport', 'page_InventoryReport', 'page_PrintLabels', 'widget_LowStockWidget', 'view_cost_price', 'print_labels']),
+            ], ['page_Dashboard', 'page_StockMatrix', 'page_LowStockReport', 'page_InventoryReport', 'page_PrintLabels', 'widget_LowStockWidget', 'print_labels']),
 
             // Solo lectura de todo, con exportación (decisión de roles), excepto usuarios y roles
             'contador' => $all->filter(fn ($p) => str_starts_with($p, 'view_') || str_starts_with($p, 'page_') || str_starts_with($p, 'widget_'))

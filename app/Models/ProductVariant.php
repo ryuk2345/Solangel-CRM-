@@ -94,6 +94,11 @@ class ProductVariant extends Model
         return $this->belongsTo(Size::class, 'size_id');
     }
 
+    public function size()
+    {
+        return $this->belongsTo(Size::class, 'size_id');
+    }
+
     public function inventories()
     {
         return $this->hasMany(Inventory::class);
