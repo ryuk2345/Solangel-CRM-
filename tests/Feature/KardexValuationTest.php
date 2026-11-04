@@ -167,14 +167,28 @@ class KardexValuationTest extends TestCase
 
     public function test_pantalla_kardex_report_y_exportacion_a_excel(): void
     {
-        // 1. Pantalla abre correctamente como administrador
-        Livewire::test(KardexReport::class)
+        // 1. Pantalla abre correctamente como administrador en modo resumen
+        $lw = Livewire::test(KardexReport::class)
             ->assertOk()
             ->assertSee('Kardex valorizado')
             ->assertSee('Movimientos (auditoría)')
-            ->assertSee('Exportar Excel (.xlsx)');
+            ->assertSee('Exportar Excel (.xlsx)')
+            ->assertSee('Resumen de Existencias Valorizadas')
+            ->assertSee('Prendas en Stock');
 
-        // 2. Exportación a Excel genera respuesta descargable
+        // 2. Transición a ficha Kardex por prenda (modo detalle)
+        $lw->call('showKardex', $this->variant->sku, $this->warehouse->name)
+            ->assertSet('viewMode', 'detail')
+            ->assertSet('selectedSku', $this->variant->sku)
+            ->assertSee('Volver al Resumen')
+            ->assertSee($this->variant->sku);
+
+        // 3. Regreso al modo resumen
+        $lw->call('showSummary')
+            ->assertSet('viewMode', 'summary')
+            ->assertSee('Resumen de Existencias Valorizadas');
+
+        // 4. Exportación a Excel genera respuesta descargable
         $report = KardexService::getReport(['period' => now()->format('Y-m')]);
         $response = KardexExcelExport::download($report);
         $this->assertEquals(200, $response->getStatusCode());

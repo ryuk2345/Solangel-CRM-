@@ -46,6 +46,39 @@ class KardexReport extends Page implements HasForms
 
     public ?array $data = [];
 
+    /** Modo de visualización: 'summary' (inventario general) o 'detail' (ficha kardex detallada). */
+    public string $viewMode = 'summary';
+
+    /** SKU seleccionado para ver su ficha Kardex individual. */
+    public ?string $selectedSku = null;
+
+    /** Almacén seleccionado para la ficha individual. */
+    public ?string $selectedWarehouseName = null;
+
+    public function showKardex(string $sku, ?string $warehouseName = null): void
+    {
+        $this->selectedSku = $sku;
+        $this->selectedWarehouseName = $warehouseName;
+        $this->viewMode = 'detail';
+    }
+
+    public function showSummary(): void
+    {
+        $this->viewMode = 'summary';
+    }
+
+    public function showAllDetails(): void
+    {
+        $this->selectedSku = null;
+        $this->selectedWarehouseName = null;
+        $this->viewMode = 'detail';
+    }
+
+    public function selectSku(?string $sku): void
+    {
+        $this->selectedSku = $sku;
+    }
+
     public function mount(): void
     {
         $defaultWh = auth()->user()?->seesAllBranches()
@@ -125,6 +158,34 @@ class KardexReport extends Page implements HasForms
         }
 
         return KardexService::getReport($filters);
+    }
+
+    /** Lista plana de todas las variantes para la tabla de inventario general. */
+    public function getAllBlocksProperty(): array
+    {
+        $blocks = [];
+        foreach ($this->report['categories'] as $catBlocks) {
+            foreach ($catBlocks as $block) {
+                $blocks[] = $block;
+            }
+        }
+        return $blocks;
+    }
+
+    /** Bloques a mostrar en la vista detallada (prenda seleccionada o todas). */
+    public function getDetailBlocksProperty(): array
+    {
+        $all = $this->allBlocks;
+        if ($this->selectedSku) {
+            return array_values(array_filter($all, function ($b) {
+                $matchesSku = $b['sku'] === $this->selectedSku;
+                if ($this->selectedWarehouseName) {
+                    return $matchesSku && $b['warehouse_name'] === $this->selectedWarehouseName;
+                }
+                return $matchesSku;
+            }));
+        }
+        return $all;
     }
 
     public function canViewCosts(): bool
