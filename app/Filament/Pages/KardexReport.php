@@ -119,7 +119,12 @@ class KardexReport extends Page implements HasForms
 
     public function getReportProperty(): array
     {
-        return KardexService::getReport($this->data ?? []);
+        $filters = $this->data ?? [];
+        if (empty($filters['period'])) {
+            $filters['period'] = now()->format('Y-m');
+        }
+
+        return KardexService::getReport($filters);
     }
 
     public function canViewCosts(): bool

@@ -141,6 +141,10 @@ class KardexValuationTest extends TestCase
 
     public function test_kardex_reporte_y_cuadro_de_comprobacion_diferencia_cero(): void
     {
+        // Tolera periodo vacío o nulo sin lanzar InvalidFormatException
+        $reportEmpty = KardexService::getReport(['period' => '']);
+        $this->assertNotEmpty($reportEmpty['period_label']);
+
         $report = KardexService::getReport([
             'period' => now()->format('Y-m'),
             'warehouse_id' => $this->warehouse->id,

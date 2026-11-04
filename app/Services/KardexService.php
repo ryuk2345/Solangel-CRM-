@@ -36,8 +36,14 @@ class KardexService
      */
     public static function getReport(array $filters): array
     {
-        $period = $filters['period'] ?? now()->format('Y-m');
-        $date = Carbon::createFromFormat('Y-m', $period)->startOfMonth();
+        $rawPeriod = !empty($filters['period']) ? (string) $filters['period'] : now()->format('Y-m');
+        try {
+            $date = Carbon::parse($rawPeriod)->startOfMonth();
+        } catch (\Throwable) {
+            $date = now()->startOfMonth();
+        }
+
+        $period = $date->format('Y-m');
         $startOfMonth = $date->copy()->startOfMonth();
         $endOfMonth = $date->copy()->endOfMonth();
 
