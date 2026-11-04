@@ -86,6 +86,7 @@ class ScreensSmokeTest extends TestCase
             Pages\StockMatrix::class,
             Pages\LowStockReport::class,
             Pages\PrintLabels::class,
+            Pages\KardexReport::class,
         ];
 
         foreach ($pages as $key => $page) {

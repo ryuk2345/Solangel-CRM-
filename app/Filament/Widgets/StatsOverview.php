@@ -2,92 +2,117 @@
 
 namespace App\Filament\Widgets;
 
-use App\Models\Product;
-use App\Models\Category;
-use App\Models\Branch;
-use App\Models\Sale;
+use App\Filament\Pages\LowStockReport;
 use App\Models\CashRegister;
+use App\Models\CompanySetting;
+use App\Models\Inventory;
+use App\Models\Product;
+use App\Models\ProductVariant;
+use App\Models\Sale;
+use App\Models\SaleItem;
+use App\Models\StockTransfer;
 use Carbon\Carbon;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class StatsOverview extends BaseWidget
 {
-    // Hacemos que el bloque ocupe todo el ancho de la pantalla
     protected int | string | array $columnSpan = 'full';
     protected static ?string $pollingInterval = null;
 
     public static function canView(): bool
     {
-        return auth()->user()->seesAllBranches() || auth()->user()->can('widget_StatsOverview');
+        return auth()->user()?->seesAllBranches() || auth()->user()?->can('widget_StatsOverview');
     }
+
     protected function getStats(): array
     {
         $user = auth()->user();
         $isSuperAdmin = $user?->seesAllBranches() ?? false;
+        $isAlmacenero = $user?->hasRole('almacenero') ?? false;
         $branchId = $user?->branch_id ?? 1;
 
-        // Cálculos financieros con filtro por tienda si no es super_admin
-        $ventasHoyQuery = Sale::whereDate('created_at', Carbon::today())
+        // 1. Ventas y unidades de hoy
+        $salesTodayQuery = Sale::whereDate('created_at', Carbon::today())
             ->where('sunat_status', '!=', 'anulado');
-
-        $ventasMesQuery = Sale::whereYear('created_at', Carbon::now()->year)
-            ->whereMonth('created_at', Carbon::now()->month)
-            ->where('sunat_status', '!=', 'anulado');
-
-        $cajasQuery = CashRegister::where('status', 'abierta');
 
         if (!$isSuperAdmin) {
-            $ventasHoyQuery->where('branch_id', $branchId);
-            $ventasMesQuery->where('branch_id', $branchId);
-            $cajasQuery->where('branch_id', $branchId);
+            $salesTodayQuery->where('branch_id', $branchId);
         }
 
-        $ventasHoy = $ventasHoyQuery->sum('total');
-        $ventasMes = $ventasMesQuery->sum('total');
-        $cajasAbiertas = $cajasQuery->count();
+        $saleIdsToday = (clone $salesTodayQuery)->pluck('id');
+        $ventasHoy = (float) (clone $salesTodayQuery)->sum('total');
+        $unidadesHoy = (int) SaleItem::whereIn('sale_id', $saleIdsToday)
+            ->whereHas('productVariant.product', fn ($p) => $p->where('is_service', false))
+            ->sum('quantity');
 
-        $branchStat = $isSuperAdmin
-            ? Stat::make('Sucursales Activas', Branch::where('is_active', true)->count())
-                ->description('Puntos de venta en red')
-                ->color('warning')
-            : Stat::make('Sucursal Asignada', $user?->branch?->name ?? 'Sede Principal')
-                ->description('Punto de venta actual')
-                ->color('warning');
+        // 2. Variantes activas
+        $variantesActivas = ProductVariant::whereHas('product', fn ($p) => $p->where('is_service', false))->count();
 
-        $productCount = $isSuperAdmin
-            ? Product::count()
-            : Product::whereHas('branches', fn($q) => $q->where('branches.id', $branchId))->count();
+        // 3. Alertas de stock bajo
+        $threshold = (int) (CompanySetting::value('low_stock_threshold') ?: 5);
+        $inventoryQuery = Inventory::whereHas('productVariant.product', fn ($p) => $p->where('is_service', false));
+        if (!$isSuperAdmin) {
+            $inventoryQuery->where('branch_id', $branchId);
+        }
+        $alertasStock = (clone $inventoryQuery)->where('stock', '<=', $threshold)->count();
 
-        $productDesc = $isSuperAdmin ? 'En todo el catálogo' : 'En catálogo de la tienda';
+        // 4. Caja diaria
+        $cajaQuery = CashRegister::where('status', 'abierta');
+        if (!$isSuperAdmin) {
+            $cajaQuery->where('branch_id', $branchId);
+        }
+        $cajaAbierta = $cajaQuery->latest('opened_at')->first();
+        $cajaLabel = $cajaAbierta ? 'S/ ' . number_format((float) ($cajaAbierta->expected_amount ?: $cajaAbierta->initial_amount), 2) : 'Cerrada';
+        $cajaDesc = $cajaAbierta ? 'Turno abierto' : 'Sin turno activo';
+        $cajaColor = $cajaAbierta ? 'success' : 'danger';
 
-        return [
-            // 📦 MÉTRICAS DE INVENTARIO
-            Stat::make('Total de Productos', $productCount)
-                ->description($productDesc)
-                ->descriptionIcon('heroicon-m-cube')
-                ->color('gray'),
-                
-            Stat::make('Categorías', Category::count())
-                ->description('Clasificaciones activas')
-                ->color('gray'),
-                
-            $branchStat,
+        // 5. Traspasos en tránsito
+        $transferQuery = StockTransfer::where('status', 'en_transito');
+        if (!$isSuperAdmin) {
+            $transferQuery->where(fn ($q) => $q->where('origin_branch_id', $branchId)->orWhere('destination_branch_id', $branchId));
+        }
+        $traspasosEnRuta = (clone $transferQuery)->count();
+        $traspasosUnidades = (int) (clone $transferQuery)->with('items')->get()->sum(fn ($t) => $t->items->sum('quantity_sent'));
 
-            // 💰 MÉTRICAS FINANCIERAS
-            Stat::make('Ventas de Hoy', 'S/ ' . number_format($ventasHoy, 2))
-                ->description('Cobrado el día de hoy')
+        $stats = [];
+
+        // Tarjetas según rol
+        if (!$isAlmacenero) {
+            $stats[] = Stat::make('Ventas de hoy', 'S/ ' . number_format($ventasHoy, 2))
+                ->description('Total cobrado hoy')
                 ->descriptionIcon('heroicon-m-arrow-trending-up')
-                ->color('success'),
-            
-            Stat::make('Ventas del Mes', 'S/ ' . number_format($ventasMes, 2))
-                ->description('Acumulado de ' . Carbon::now()->translatedFormat('F'))
-                ->color('info'),
+                ->color('success');
 
-            Stat::make('Cajas Abiertas', $cajasAbiertas)
-                ->description($cajasAbiertas > 0 ? 'Turnos activos' : 'Todas las cajas cerradas')
-                ->color($cajasAbiertas > 0 ? 'success' : 'danger')
-                ->descriptionIcon($cajasAbiertas > 0 ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed'),
-        ];
+            $stats[] = Stat::make('Unidades vendidas hoy', $unidadesHoy)
+                ->description('Prendas entregadas hoy')
+                ->descriptionIcon('heroicon-m-shopping-bag')
+                ->color('primary');
+        }
+
+        $stats[] = Stat::make('Variantes activas', $variantesActivas)
+            ->description('Modelos, tallas y colores')
+            ->descriptionIcon('heroicon-m-cube')
+            ->color('gray');
+
+        $stats[] = Stat::make('Alertas de stock', $alertasStock)
+            ->description($alertasStock > 0 ? 'Prendas con stock bajo o agotadas' : 'Inventario en niveles óptimos')
+            ->descriptionIcon('heroicon-m-exclamation-triangle')
+            ->color($alertasStock > 0 ? 'danger' : 'success')
+            ->url(LowStockReport::getUrl());
+
+        if (!$isAlmacenero) {
+            $stats[] = Stat::make('Caja diaria', $cajaLabel)
+                ->description($cajaDesc)
+                ->descriptionIcon($cajaAbierta ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                ->color($cajaColor);
+        }
+
+        $stats[] = Stat::make('Traspasos en ruta', $traspasosEnRuta)
+            ->description("{$traspasosUnidades} prendas en tránsito")
+            ->descriptionIcon('heroicon-m-truck')
+            ->color($traspasosEnRuta > 0 ? 'warning' : 'gray');
+
+        return $stats;
     }
 }
