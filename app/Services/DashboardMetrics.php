@@ -463,4 +463,91 @@ class DashboardMetrics
             ->latest('sent_at')
             ->get();
     }
+
+    /**
+     * Unidades totales de stock físico en inventario.
+     */
+    public static function stockUnitsCount(?int $branchId = null): int
+    {
+        return (int) Inventory::query()
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->sum('stock');
+    }
+
+    /**
+     * Total de modelos activos (productos no servicio).
+     */
+    public static function modelsCount(?int $branchId = null): int
+    {
+        return (int) \App\Models\Product::query()
+            ->where('is_service', false)
+            ->when($branchId, fn ($q) => $q->whereHas('branches', fn ($b) => $b->where('branches.id', $branchId)))
+            ->count();
+    }
+
+    /**
+     * Total de variantes activas.
+     */
+    public static function variantsCount(?int $branchId = null): int
+    {
+        return (int) ProductVariant::query()
+            ->where('is_active', true)
+            ->whereHas('product', fn ($p) => $p->where('is_service', false))
+            ->when($branchId, fn ($q) => $q->whereHas('product.branches', fn ($b) => $b->where('branches.id', $branchId)))
+            ->count();
+    }
+
+    /**
+     * Cantidad de variantes en alerta de stock (<= umbral de bajo stock).
+     */
+    public static function stockAlertsCount(?int $branchId = null): int
+    {
+        return (int) Inventory::query()
+            ->lowStock()
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->count();
+    }
+
+    /**
+     * Cantidad de cajas abiertas actualmente.
+     */
+    public static function openCashRegistersCount(?int $branchId = null): int
+    {
+        return (int) CashRegister::query()
+            ->where('status', 'abierta')
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->count();
+    }
+
+    /**
+     * Top de prendas más vendidas del mes.
+     *
+     * @return Collection<int, object{product_name: string, color_name: string, size_name: string, units_sold: int, total_amount: float}>
+     */
+    public static function topSellingProductsThisMonth(?int $branchId = null, int $limit = 10): Collection
+    {
+        $startOfMonth = Carbon::now()->startOfMonth();
+        $endOfMonth = Carbon::now()->endOfMonth();
+
+        return DB::table('sale_items as si')
+            ->join('sales as s', 's.id', '=', 'si.sale_id')
+            ->join('product_variants as pv', 'pv.id', '=', 'si.product_variant_id')
+            ->join('products as p', 'p.id', '=', 'pv.product_id')
+            ->leftJoin('colors as c', 'c.id', '=', 'pv.color_id')
+            ->leftJoin('sizes as sz', 'sz.id', '=', 'pv.size_id')
+            ->whereNotIn('s.sunat_status', ['anulado', 'rechazado'])
+            ->whereBetween('s.issue_date', [$startOfMonth, $endOfMonth])
+            ->when($branchId, fn ($q) => $q->where('s.branch_id', $branchId))
+            ->groupBy('pv.id', 'p.name', 'c.name', 'sz.name', 'pv.size', 'pv.color_name')
+            ->selectRaw('
+                p.name as product_name,
+                COALESCE(c.name, pv.color_name, "Único") as color_name,
+                COALESCE(sz.name, pv.size, "Única") as size_name,
+                CAST(SUM(si.quantity) AS SIGNED) as units_sold,
+                CAST(SUM(si.total) AS DECIMAL(10,2)) as total_amount
+            ')
+            ->orderByDesc('units_sold')
+            ->limit($limit)
+            ->get();
+    }
 }
