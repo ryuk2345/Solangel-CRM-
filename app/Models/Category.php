@@ -11,4 +11,9 @@ class Category extends Model
 
     // ESTA ES LA LÍNEA MÁGICA QUE FALTA:
     protected $guarded = []; 
+
+    public function products()
+    {
+        return $this->hasMany(Product::class);
+    }
 }

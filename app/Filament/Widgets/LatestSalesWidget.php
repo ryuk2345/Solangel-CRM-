@@ -2,87 +2,88 @@
 
 namespace App\Filament\Widgets;
 
+use App\Models\Sale;
+use App\Services\DashboardMetrics;
+use Carbon\Carbon;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Filament\Widgets\Concerns\InteractsWithPageFilters;
 use Filament\Widgets\TableWidget as BaseWidget;
-use App\Models\Sale;
 
+/**
+ * Fila condicional: Últimas 5 ventas del día en vivo (polling 60s).
+ * Se oculta automáticamente si no hay ventas hoy o para el rol almacenero.
+ */
 class LatestSalesWidget extends BaseWidget
 {
-    // Hace que la tabla ocupe todo el ancho de la pantalla debajo de los gráficos
+    use InteractsWithPageFilters;
+
     protected int | string | array $columnSpan = 'full';
-    protected static ?string $pollingInterval = null;
+    protected static ?string $heading = 'Últimas 5 ventas de hoy';
+    protected static ?string $pollingInterval = '60s';
 
     public static function canView(): bool
     {
-        return auth()->user()->seesAllBranches() || auth()->user()->can('widget_LatestSalesWidget');
+        $user = auth()->user();
+        if (!$user || $user->hasRole('almacenero')) {
+            return false;
+        }
+
+        $branchId = !$user->seesAllBranches() ? ($user->branch_id ?? 1) : null;
+        return DashboardMetrics::todayHasSales($branchId);
     }
-    // Título de la tabla
-    protected static ?string $heading = 'Últimas 5 Ventas en Vivo 🔴';
-    
-    // Orden de aparición (4 para que vaya al final)
-    protected static ?int $sort = 4;
+
+    protected function getBranchId(): ?int
+    {
+        $user = auth()->user();
+        if (!$user?->seesAllBranches()) {
+            return $user?->branch_id ?? 1;
+        }
+
+        return !empty($this->filters['branch_id']) ? (int) $this->filters['branch_id'] : null;
+    }
 
     public function table(Table $table): Table
     {
-        $user = auth()->user();
-        $isSuperAdmin = $user?->seesAllBranches() ?? false;
-        $branchId = $user?->branch_id ?? 1;
+        $branchId = $this->getBranchId();
 
-        $query = Sale::query()->with('branch')->latest()->limit(5);
-        if (!$isSuperAdmin) {
-            $query->where('branch_id', $branchId);
-        }
+        $query = Sale::query()
+            ->with(['customer', 'items'])
+            ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
+            ->whereDate('issue_date', Carbon::today())
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->latest('created_at')
+            ->limit(5);
 
         return $table
             ->query($query)
             ->columns([
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Hora')
-                    ->dateTime('d/m/Y h:i A')
-                    ->sortable(),
-
-                Tables\Columns\TextColumn::make('branch.name')
-                    ->label('Sucursal')
-                    ->badge()
-                    ->color('info')
-                    ->visible($isSuperAdmin),
+                    ->dateTime('h:i A'),
 
                 Tables\Columns\TextColumn::make('serie')
-                    ->label('Documento')
+                    ->label('Comprobante')
                     ->formatStateUsing(fn ($record) => $record->serie . '-' . $record->correlative)
                     ->weight('bold'),
 
-                Tables\Columns\TextColumn::make('payment_method')
-                    ->label('Método de Pago')
-                    ->badge()
-                    ->color(fn (string $state): string => match (strtolower(trim($state))) {
-                        'efectivo' => 'success',
-                        'yape' => 'info',
-                        'plin' => 'info',
-                        'tarjeta' => 'primary',
-                        'transferencia' => 'gray',
-                        default => 'warning',
-                    })
-                    ->formatStateUsing(fn (string $state): string => ucfirst($state)),
+                Tables\Columns\TextColumn::make('customer.name')
+                    ->label('Cliente')
+                    ->default('Cliente general')
+                    ->wrap(),
 
-                Tables\Columns\TextColumn::make('sunat_status')
-                    ->label('SUNAT')
+                Tables\Columns\TextColumn::make('tipo_precio')
+                    ->label('Tipo de precio')
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'aceptado' => 'success',
-                        'pendiente' => 'warning',
-                        'anulado' => 'danger',
-                        default => 'gray',
-                    }),
+                    ->state(fn ($record) => $record->items->contains(fn ($i) => $i->price_type === 'wholesale') ? 'Mayorista' : 'Minorista')
+                    ->color(fn (string $state): string => $state === 'Mayorista' ? 'success' : 'primary'),
 
                 Tables\Columns\TextColumn::make('total')
-                    ->label('Total (S/)')
+                    ->label('Total')
                     ->money('PEN')
                     ->weight('bold')
-                    ->color('success')
-                    ->size(Tables\Columns\TextColumn\TextColumnSize::Large),
+                    ->alignEnd(),
             ])
-            ->paginated(false); // Quitamos la paginación porque solo son 5 fijas
+            ->paginated(false);
     }
 }
