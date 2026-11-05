@@ -167,32 +167,53 @@ class KardexValuationTest extends TestCase
 
     public function test_pantalla_kardex_report_y_exportacion_a_excel(): void
     {
-        // 1. Pantalla abre correctamente como administrador en modo resumen
+        // 1. Pantalla abre correctamente como administrador en pestaña Valorización
         $lw = Livewire::test(KardexReport::class)
             ->assertOk()
             ->assertSee('Kardex valorizado')
-            ->assertSee('Movimientos (auditoría)')
-            ->assertSee('Exportar Excel (.xlsx)')
-            ->assertSee('Resumen de Existencias Valorizadas')
-            ->assertSee('Prendas en Stock');
+            ->assertSee('Valorización')
+            ->assertSee('Movimientos por prenda')
+            ->assertSee('Exportar Excel (formato contador)')
+            ->assertSee('Exportar formato SUNAT 13.1')
+            ->assertSee('Inventario inicial')
+            ->assertSee('Comprobación');
 
-        // 2. Transición a ficha Kardex por prenda (modo detalle)
-        $lw->call('showKardex', $this->variant->sku, $this->warehouse->name)
-            ->assertSet('viewMode', 'detail')
-            ->assertSet('selectedSku', $this->variant->sku)
-            ->assertSee('Volver al Resumen')
-            ->assertSee($this->variant->sku);
+        // 2. Transición a ficha de movimientos por prenda (Pestaña B)
+        $lw->call('openMovements', $this->variant->id, $this->warehouse->id)
+            ->assertSet('activeTab', 'movements')
+            ->assertSet('selectedVariantId', $this->variant->id)
+            ->assertSee('Seleccionar Prenda')
+            ->assertSee('ENTRADAS')
+            ->assertSee('SALIDAS')
+            ->assertSee('SALDO');
 
-        // 3. Regreso al modo resumen
-        $lw->call('showSummary')
-            ->assertSet('viewMode', 'summary')
-            ->assertSee('Resumen de Existencias Valorizadas');
+        // 3. Regreso a la pestaña de valorización
+        $lw->call('setActiveTab', 'valuation')
+            ->assertSet('activeTab', 'valuation')
+            ->assertSee('Valorización');
 
         // 4. Exportación a Excel genera respuesta descargable
         $report = KardexService::getReport(['period' => now()->format('Y-m')]);
         $response = KardexExcelExport::download($report);
         $this->assertEquals(200, $response->getStatusCode());
         $this->assertStringContainsString('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', $response->headers->get('Content-Type'));
+    }
+
+    public function test_tarjetas_stats_cambian_al_cambiar_periodo(): void
+    {
+        $lw = Livewire::test(KardexReport::class)->assertOk();
+
+        // Stats del periodo actual
+        $statsActual = $lw->instance()->getStats();
+        $this->assertCount(4, $statsActual);
+
+        // Cambiar periodo a mes pasado
+        $pastPeriod = now()->subMonth()->format('Y-m');
+        $lw->set('data.period', $pastPeriod);
+
+        $statsPasado = $lw->instance()->getStats();
+        $this->assertCount(4, $statsPasado);
+        $this->assertNotNull($statsPasado[0]->getValue());
     }
 
     public function test_comando_revalorizar_kardex_es_idempotente(): void

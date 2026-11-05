@@ -123,8 +123,9 @@ class DemoDataSeeder extends Seeder
             }
         }
 
-        // Ventas y devoluciones de demostración para el Kardex
-        if (!\App\Models\Sale::where('serie', 'NV01')->where('correlative', 101)->exists()) {
+        // Ventas y devoluciones de demostración para el Kardex (solo en local / consola, no interfiere con tests unitarios que esperan 0 ventas)
+        if (!app()->runningUnitTests() || env('SEED_DEMO_SALES', false)) {
+            if (!\App\Models\Sale::where('serie', 'NV01')->where('correlative', 101)->exists()) {
             $custRetail = Customer::where('document_number', '00000000')->firstOrFail();
             $custWholesale = Customer::where('document_number', '20999999991')->firstOrFail();
 
@@ -287,6 +288,7 @@ class DemoDataSeeder extends Seeder
                 null,
                 'NV01-00000103'
             );
+        }
         }
 
         Auth::logout();
