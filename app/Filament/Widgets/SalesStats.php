@@ -59,7 +59,7 @@ class SalesStats extends BaseWidget
         ];
     }
 
-    protected function getColumns(): int | string | array
+    protected function getColumns(): int
     {
         $user = auth()->user();
         if ($user?->hasRole('vendedor')) {

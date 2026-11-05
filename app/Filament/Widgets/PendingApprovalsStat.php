@@ -53,7 +53,7 @@ class PendingApprovalsStat extends BaseWidget
         ];
     }
 
-    protected function getColumns(): int | string | array
+    protected function getColumns(): int
     {
         return 1;
     }

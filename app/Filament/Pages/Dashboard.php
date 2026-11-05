@@ -56,8 +56,8 @@ class Dashboard extends BaseDashboard
     public function getWidgets(): array
     {
         return [
-            // Fila 0: Bienvenida y salir (nativo de Filament en español)
-            \Filament\Widgets\AccountWidget::class,
+            // Fila 0: Bienvenida y salir (nativo de Filament en español a ancho completo)
+            \App\Filament\Widgets\AccountWidget::class,
 
             // Fila 1: Prendas en stock · Alertas de stock · Por cobrar
             \App\Filament\Widgets\InventoryStats::class,

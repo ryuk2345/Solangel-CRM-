@@ -47,7 +47,7 @@ class InventoryStats extends BaseWidget
         return $user?->branch_id;
     }
 
-    protected function getColumns(): int | string | array
+    protected function getColumns(): int
     {
         $user = auth()->user();
         if ($user?->hasRole('almacenero')) {
