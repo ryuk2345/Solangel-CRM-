@@ -288,6 +288,75 @@ class DemoDataSeeder extends Seeder
                 null,
                 'NV01-00000103'
             );
+
+            // 5. Casos de atención y demostración operativa (solo demo local)
+            $vendedor = User::where('email', 'vendedor@demo.test')->first();
+            if ($vendedor) {
+                if (!\App\Models\WholesalePriceRequest::where('status', 'pendiente')->exists()) {
+                    \App\Models\WholesalePriceRequest::create([
+                        'branch_id' => $branch->id,
+                        'customer_id' => $custWholesale->id,
+                        'requested_by' => $vendedor->id,
+                        'items' => [['name' => 'Casaca rompevientos', 'quantity' => 1]],
+                        'status' => 'pendiente',
+                    ]);
+                }
+
+                if (!\App\Models\CashRegister::where('user_id', $vendedor->id)->where('status', 'abierta')->exists()) {
+                    \App\Models\CashRegister::create([
+                        'user_id' => $vendedor->id,
+                        'branch_id' => $branch->id,
+                        'status' => 'abierta',
+                        'opened_at' => now()->startOfDay()->addHours(8),
+                        'initial_amount' => 150.00,
+                    ]);
+                }
+            }
+
+            if (!\App\Models\Sale::where('serie', 'F001')->where('correlative', 101)->exists()) {
+                \App\Models\Sale::create([
+                    'user_id' => $admin->id,
+                    'customer_id' => $custWholesale->id,
+                    'branch_id' => $branch->id,
+                    'warehouse_id' => $warehouse->id,
+                    'document_type' => '01',
+                    'serie' => 'F001',
+                    'correlative' => 101,
+                    'issue_date' => now()->subDays(15),
+                    'due_date' => now()->subDays(5),
+                    'subtotal' => 300.00,
+                    'igv' => 54.00,
+                    'total' => 354.00,
+                    'credit_balance' => 354.00,
+                    'payment_condition' => 'credito',
+                    'payment_method' => 'transferencia',
+                    'sunat_status' => 'aceptado',
+                ]);
+            }
+
+            // Traspaso por recibir en la tienda
+            $otherBranch = \App\Models\Branch::where('id', '!=', $branch->id)->first();
+            if ($otherBranch && !\App\Models\StockTransfer::where('destination_branch_id', $branch->id)->where('status', 'en_transito')->exists()) {
+                $otherWh = \App\Models\Warehouse::where('branch_id', $otherBranch->id)->first();
+                $transfer = \App\Models\StockTransfer::create([
+                    'origin_branch_id' => $otherBranch->id,
+                    'origin_warehouse_id' => $otherWh?->id ?? $warehouse->id,
+                    'destination_branch_id' => $branch->id,
+                    'destination_warehouse_id' => $warehouse->id,
+                    'sent_by' => $admin->id,
+                    'status' => 'en_transito',
+                    'sent_at' => now()->subHours(2),
+                    'transfer_number' => 'TR-00001',
+                ]);
+                $transfer->items()->create([
+                    'product_variant_id' => $poloVar->id,
+                    'quantity_sent' => 10,
+                ]);
+            }
+
+            // Variantes con stock bajo para demostrar "Reponer primero" con días de stock
+            \App\Models\Inventory::where('product_variant_id', $poloVar->id)->where('warehouse_id', $warehouse->id)->update(['stock' => 4]);
+            \App\Models\Inventory::where('product_variant_id', $blusaVar->id)->where('warehouse_id', $warehouse->id)->update(['stock' => 6]);
         }
         }
 
