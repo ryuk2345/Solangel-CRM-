@@ -123,6 +123,172 @@ class DemoDataSeeder extends Seeder
             }
         }
 
+        // Ventas y devoluciones de demostración para el Kardex
+        if (!\App\Models\Sale::where('serie', 'NV01')->where('correlative', 101)->exists()) {
+            $custRetail = Customer::where('document_number', '00000000')->firstOrFail();
+            $custWholesale = Customer::where('document_number', '20999999991')->firstOrFail();
+
+            $polo = Product::where('name', 'Polo básico algodón pima')->firstOrFail();
+            $poloVar = $polo->variants()->firstOrFail();
+
+            $blusa = Product::where('name', 'Blusa lino manga corta')->firstOrFail();
+            $blusaVar = $blusa->variants()->firstOrFail();
+
+            $casaca = Product::where('name', 'Casaca rompevientos')->firstOrFail();
+            $casacaVar = $casaca->variants()->firstOrFail();
+
+            $jean = Product::where('name', 'Jean slim fit')->firstOrFail();
+            $jeanVar = $jean->variants()->firstOrFail();
+
+            // 1. Venta 1 (Minorista): 2 Polos básicos
+            $total1 = 59.90 * 2;
+            $subtotal1 = round($total1 / 1.18, 2);
+            $igv1 = round($total1 - $subtotal1, 2);
+            $sale1 = \App\Models\Sale::create([
+                'user_id' => $admin->id,
+                'customer_id' => $custRetail->id,
+                'branch_id' => $branch->id,
+                'warehouse_id' => $warehouse->id,
+                'document_type' => '00',
+                'serie' => 'NV01',
+                'correlative' => 101,
+                'issue_date' => now(),
+                'subtotal' => $subtotal1,
+                'igv' => $igv1,
+                'total' => $total1,
+                'payment_condition' => 'contado',
+                'payment_method' => 'efectivo',
+                'sunat_status' => 'interna',
+            ]);
+            $item1 = $sale1->items()->create([
+                'product_variant_id' => $poloVar->id,
+                'product_name' => $polo->name,
+                'quantity' => 2,
+                'price' => 59.90,
+                'igv' => $igv1,
+                'total' => $total1,
+            ]);
+            StockService::move(
+                $poloVar->id,
+                $warehouse->id,
+                -2,
+                'sale',
+                $sale1,
+                'Venta NV01-00000101',
+                null,
+                'NV01-00000101'
+            );
+
+            // 2. Devolución de cliente: 1 Polo devuelto por talla
+            \App\Services\SaleExchangeService::register(
+                $sale1,
+                [$item1->id => 1],
+                'devolucion',
+                'Talla no adecuada'
+            );
+
+            // 3. Venta 2 (Minorista): 1 Blusa lino
+            $total2 = 79.90;
+            $subtotal2 = round($total2 / 1.18, 2);
+            $igv2 = round($total2 - $subtotal2, 2);
+            $sale2 = \App\Models\Sale::create([
+                'user_id' => $admin->id,
+                'customer_id' => $custRetail->id,
+                'branch_id' => $branch->id,
+                'warehouse_id' => $warehouse->id,
+                'document_type' => '00',
+                'serie' => 'NV01',
+                'correlative' => 102,
+                'issue_date' => now(),
+                'subtotal' => $subtotal2,
+                'igv' => $igv2,
+                'total' => $total2,
+                'payment_condition' => 'contado',
+                'payment_method' => 'efectivo',
+                'sunat_status' => 'interna',
+            ]);
+            $sale2->items()->create([
+                'product_variant_id' => $blusaVar->id,
+                'product_name' => $blusa->name,
+                'quantity' => 1,
+                'price' => 79.90,
+                'igv' => $igv2,
+                'total' => $total2,
+            ]);
+            StockService::move(
+                $blusaVar->id,
+                $warehouse->id,
+                -1,
+                'sale',
+                $sale2,
+                'Venta NV01-00000102',
+                null,
+                'NV01-00000102'
+            );
+
+            // 4. Venta 3 (Mayorista de 2+ prendas): 3 Casacas (S/ 120 c/u) + 2 Jeans (S/ 110 c/u) = 5 prendas
+            $totalCasacas = 120.00 * 3;
+            $totalJeans = 110.00 * 2;
+            $total3 = $totalCasacas + $totalJeans; // 580.00
+            $subtotal3 = round($total3 / 1.18, 2);
+            $igv3 = round($total3 - $subtotal3, 2);
+            $sale3 = \App\Models\Sale::create([
+                'user_id' => $admin->id,
+                'customer_id' => $custWholesale->id,
+                'branch_id' => $branch->id,
+                'warehouse_id' => $warehouse->id,
+                'document_type' => '00',
+                'serie' => 'NV01',
+                'correlative' => 103,
+                'issue_date' => now(),
+                'subtotal' => $subtotal3,
+                'igv' => $igv3,
+                'total' => $total3,
+                'payment_condition' => 'contado',
+                'payment_method' => 'transferencia',
+                'sunat_status' => 'interna',
+            ]);
+            $subCasacas = round($totalCasacas / 1.18, 2);
+            $sale3->items()->create([
+                'product_variant_id' => $casacaVar->id,
+                'product_name' => $casaca->name,
+                'quantity' => 3,
+                'price' => 120.00,
+                'igv' => round($totalCasacas - $subCasacas, 2),
+                'total' => $totalCasacas,
+            ]);
+            StockService::move(
+                $casacaVar->id,
+                $warehouse->id,
+                -3,
+                'sale',
+                $sale3,
+                'Venta NV01-00000103',
+                null,
+                'NV01-00000103'
+            );
+
+            $subJeans = round($totalJeans / 1.18, 2);
+            $sale3->items()->create([
+                'product_variant_id' => $jeanVar->id,
+                'product_name' => $jean->name,
+                'quantity' => 2,
+                'price' => 110.00,
+                'igv' => round($totalJeans - $subJeans, 2),
+                'total' => $totalJeans,
+            ]);
+            StockService::move(
+                $jeanVar->id,
+                $warehouse->id,
+                -2,
+                'sale',
+                $sale3,
+                'Venta NV01-00000103',
+                null,
+                'NV01-00000103'
+            );
+        }
+
         Auth::logout();
 
         $this->command?->info('✅ Datos demo: 4 modelos con variantes y stock, delivery, 2 clientes y usuarios por rol.');
