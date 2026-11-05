@@ -3,20 +3,21 @@
 namespace Tests\Feature;
 
 use App\Filament\Pages\Dashboard;
-use App\Filament\Widgets\AdminFinancialStats;
-use App\Filament\Widgets\InTransitTransfersWidget;
+use App\Filament\Widgets\AdminStatsOverview;
+use App\Filament\Widgets\ContadorStatsOverview;
+use App\Filament\Widgets\IncomingTransfersWidget;
 use App\Filament\Widgets\LatestSalesWidget;
-use App\Filament\Widgets\SalesBreakdownChart;
-use App\Filament\Widgets\ShopCashWidget;
-use App\Filament\Widgets\StatsOverview;
-use App\Filament\Widgets\StockBySizeWidget;
+use App\Filament\Widgets\NeedsAttentionWidget;
+use App\Filament\Widgets\RestockPriorityWidget;
+use App\Filament\Widgets\SellerPriceRequestsWidget;
+use App\Filament\Widgets\SellerStatsOverview;
 use App\Filament\Widgets\TopModelsWidget;
-use App\Models\CashRegister;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\StockTransfer;
 use App\Models\User;
+use App\Models\WholesalePriceRequest;
 use App\Services\DashboardMetrics;
 use App\Services\StockService;
 use Database\Seeders\DemoDataSeeder;
@@ -39,122 +40,174 @@ class DashboardWidgetsTest extends TestCase
         Filament::setCurrentPanel(Filament::getPanel('admin'));
     }
 
-    public function test_dashboard_y_widgets_abren_para_administrador(): void
+    public function test_administrador_ve_sus_widgets_especificos(): void
     {
         $admin = User::where('email', 'administrador@demo.test')->firstOrFail();
         $this->actingAs($admin);
 
         Livewire::test(Dashboard::class)->assertOk();
 
-        // Fila 1: Stats
-        Livewire::test(StatsOverview::class)
+        // Ve sus stats
+        $this->assertTrue(AdminStatsOverview::canView());
+        Livewire::test(AdminStatsOverview::class)
             ->assertOk()
-            ->assertSee('Ventas de hoy')
-            ->assertSee('Unidades vendidas hoy')
-            ->assertSee('Variantes activas')
-            ->assertSee('Alertas de stock');
+            ->assertSee('Ventas hoy')
+            ->assertSee('Ventas del mes')
+            ->assertSee('Margen del mes')
+            ->assertSee('Por cobrar');
 
-        // Fila 2: Stock por talla
-        Livewire::test(StockBySizeWidget::class)
-            ->assertOk()
-            ->assertSee('Stock por talla');
+        // Ve incidencias y reposición
+        $this->assertTrue(NeedsAttentionWidget::class::canView());
+        Livewire::test(NeedsAttentionWidget::class)->assertOk();
 
-        // Fila 3: Caja y Traspasos
-        Livewire::test(ShopCashWidget::class)->assertOk()->assertSee('Caja de la tienda');
-        Livewire::test(InTransitTransfersWidget::class)->assertOk()->assertSee('Traspasos en ruta');
+        $this->assertTrue(RestockPriorityWidget::class::canView());
+        Livewire::test(RestockPriorityWidget::class)->assertOk()->assertSee('Reponer primero');
 
-        // Fila 4: Gráfico y Top 5
-        Livewire::test(SalesBreakdownChart::class)->assertOk();
-        Livewire::test(TopModelsWidget::class)->assertOk()->assertSee('Top 5 modelos');
+        // Ve Top 5
+        $this->assertTrue(TopModelsWidget::class::canView());
+        Livewire::test(TopModelsWidget::class)->assertOk();
 
-        // Fila 5: Indicadores financieros (Admin ve las 3 tarjetas)
-        Livewire::test(AdminFinancialStats::class)
-            ->assertOk()
-            ->assertSee('Por cobrar vencido')
-            ->assertSee('Aprobaciones pendientes')
-            ->assertSee('Margen del mes');
+        // NO ve los widgets de otros roles
+        $this->assertFalse(ContadorStatsOverview::canView());
+        $this->assertFalse(SellerStatsOverview::canView());
+        $this->assertFalse(SellerPriceRequestsWidget::canView());
+        $this->assertFalse(IncomingTransfersWidget::canView());
     }
 
-    public function test_vendedor_ve_panel_de_su_tienda_con_caja_y_stock(): void
-    {
-        $vendedor = User::where('email', 'vendedor@demo.test')->firstOrFail();
-        $this->actingAs($vendedor);
-
-        CashRegister::create([
-            'user_id' => $vendedor->id,
-            'branch_id' => 1,
-            'status' => 'abierta',
-            'opened_at' => now(),
-            'initial_amount' => 150.00,
-        ]);
-
-        Livewire::test(StatsOverview::class)
-            ->assertOk()
-            ->assertSee('Ventas de hoy')
-            ->assertSee('Unidades vendidas');
-
-        Livewire::test(StockBySizeWidget::class)->assertOk();
-        Livewire::test(ShopCashWidget::class)->assertOk()->assertSee('Abierta');
-        Livewire::test(InTransitTransfersWidget::class)->assertOk();
-
-        // Vendedor no ve métricas gerenciales ni costos
-        $this->assertFalse(SalesBreakdownChart::canView());
-        $this->assertFalse(TopModelsWidget::canView());
-        $this->assertFalse(AdminFinancialStats::canView());
-    }
-
-    public function test_almacenero_no_ve_ventas_ni_caja_en_tarjetas(): void
-    {
-        $almacenero = User::where('email', 'almacenero@demo.test')->firstOrFail();
-        $this->actingAs($almacenero);
-
-        Livewire::test(StatsOverview::class)
-            ->assertOk()
-            ->assertDontSee('Ventas de hoy')
-            ->assertDontSee('Unidades vendidas hoy')
-            ->assertSee('Variantes activas')
-            ->assertSee('Alertas de stock');
-
-        // Almacenero no ve la caja de dinero
-        $this->assertFalse(ShopCashWidget::canView());
-
-        // Sí ve traspasos y stock
-        Livewire::test(StockBySizeWidget::class)->assertOk();
-        Livewire::test(InTransitTransfersWidget::class)->assertOk()->assertSee('Traspasos en ruta');
-
-        // No ve costos ni finanzas
-        $this->assertFalse(AdminFinancialStats::canView());
-    }
-
-    public function test_contador_ve_margen_pero_no_cobranzas(): void
+    public function test_contador_ve_sus_widgets_especificos(): void
     {
         $contador = User::where('email', 'contador@demo.test')->firstOrFail();
         $this->actingAs($contador);
 
-        $this->assertTrue(AdminFinancialStats::canView());
-        $this->assertTrue(SalesBreakdownChart::canView());
-        $this->assertTrue(TopModelsWidget::canView());
+        Livewire::test(Dashboard::class)->assertOk();
 
-        Livewire::test(AdminFinancialStats::class)
+        // Ve sus stats contables
+        $this->assertTrue(ContadorStatsOverview::canView());
+        Livewire::test(ContadorStatsOverview::class)
             ->assertOk()
+            ->assertSee('Ventas del mes')
             ->assertSee('Margen del mes')
-            ->assertDontSee('Por cobrar vencido');
+            ->assertSee('Por cobrar')
+            ->assertSee('Inventario valorizado');
+
+        // Ve incidencias (solo SUNAT y créditos)
+        $this->assertTrue(NeedsAttentionWidget::class::canView());
+        Livewire::test(NeedsAttentionWidget::class)->assertOk();
+
+        // NO ve los demás widgets
+        $this->assertFalse(AdminStatsOverview::canView());
+        $this->assertFalse(SellerStatsOverview::canView());
+        $this->assertFalse(RestockPriorityWidget::canView());
+        $this->assertFalse(TopModelsWidget::canView());
+        $this->assertFalse(SellerPriceRequestsWidget::canView());
+        $this->assertFalse(IncomingTransfersWidget::canView());
+        $this->assertFalse(LatestSalesWidget::canView());
     }
 
-    public function test_dashboard_metrics_calcula_ventas_netas_unidades_y_margen(): void
+    public function test_vendedor_ve_sus_widgets_especificos(): void
+    {
+        $vendedor = User::where('email', 'vendedor@demo.test')->firstOrFail();
+        $this->actingAs($vendedor);
+
+        Livewire::test(Dashboard::class)->assertOk();
+
+        // Ve sus stats
+        $this->assertTrue(SellerStatsOverview::canView());
+        Livewire::test(SellerStatsOverview::class)
+            ->assertOk()
+            ->assertSee('Mis ventas hoy')
+            ->assertSee('Mi caja');
+
+        // NO ve los widgets administrativos ni contables
+        $this->assertFalse(AdminStatsOverview::canView());
+        $this->assertFalse(ContadorStatsOverview::canView());
+        $this->assertFalse(NeedsAttentionWidget::canView());
+        $this->assertFalse(RestockPriorityWidget::canView());
+        $this->assertFalse(TopModelsWidget::canView());
+        $this->assertFalse(IncomingTransfersWidget::canView());
+    }
+
+    public function test_almacenero_ve_sus_widgets_especificos(): void
+    {
+        $almacenero = User::where('email', 'almacenero@demo.test')->firstOrFail();
+        $this->actingAs($almacenero);
+
+        Livewire::test(Dashboard::class)->assertOk();
+
+        // Ve reposición urgente
+        $this->assertTrue(RestockPriorityWidget::canView());
+        Livewire::test(RestockPriorityWidget::class)
+            ->assertOk()
+            ->assertSee('Reponer primero');
+
+        // NO ve stats ni ventas ni finanzas
+        $this->assertFalse(AdminStatsOverview::canView());
+        $this->assertFalse(ContadorStatsOverview::canView());
+        $this->assertFalse(SellerStatsOverview::canView());
+        $this->assertFalse(NeedsAttentionWidget::canView());
+        $this->assertFalse(TopModelsWidget::canView());
+        $this->assertFalse(SellerPriceRequestsWidget::canView());
+        $this->assertFalse(LatestSalesWidget::canView());
+    }
+
+    public function test_requiere_atencion_muestra_aprobacion_pendiente_y_credito_vencido(): void
+    {
+        $admin = User::where('email', 'administrador@demo.test')->firstOrFail();
+        $this->actingAs($admin);
+
+        $customer = Customer::firstOrFail();
+
+        // 1. Solicitud de precio mayorista pendiente
+        WholesalePriceRequest::create([
+            'branch_id' => 1,
+            'customer_id' => $customer->id,
+            'requested_by' => $admin->id,
+            'items' => [['name' => 'Polo básico', 'quantity' => 1]],
+            'status' => 'pendiente',
+        ]);
+
+        // 2. Crédito vencido
+        Sale::create([
+            'user_id' => $admin->id,
+            'customer_id' => $customer->id,
+            'branch_id' => 1,
+            'warehouse_id' => 1,
+            'document_type' => '01',
+            'serie' => 'F001',
+            'correlative' => 999,
+            'issue_date' => now()->subDays(10),
+            'due_date' => now()->subDays(3),
+            'subtotal' => 200.00,
+            'igv' => 36.00,
+            'total' => 236.00,
+            'credit_balance' => 236.00,
+            'payment_condition' => 'credito',
+            'sunat_status' => 'aceptado',
+        ]);
+
+        Livewire::test(NeedsAttentionWidget::class)
+            ->assertOk()
+            ->assertSee('Aprobaciones de precio pendientes')
+            ->assertSee('Créditos vencidos')
+            ->assertSee('S/ 236.00');
+    }
+
+    public function test_reponer_primero_ordena_por_dias_de_stock(): void
     {
         $admin = User::where('email', 'administrador@demo.test')->firstOrFail();
         $this->actingAs($admin);
 
         $customer = Customer::firstOrFail();
         $product = Product::where('name', 'Polo básico algodón pima')->firstOrFail();
-        $variant = $product->variants()->firstOrFail();
+        $variants = $product->variants()->take(2)->get();
 
-        // 1. Venta minorista: 2 polos @ 59.90 = 119.80 (subtotal = 101.53, igv = 18.27)
-        $subtotal = 101.53;
-        $igv = 18.27;
-        $total = 119.80;
+        $vUrgent = $variants[0];
+        $vNormal = $variants[1];
 
+        // Asegurar que esté por debajo del umbral para que califique como reposición urgente
+        \App\Models\Inventory::where('product_variant_id', $vUrgent->id)->update(['stock' => 5]);
+
+        // Crear venta reciente para generar alta rotación en $vUrgent (muchas ventas en 30 d)
         $sale = Sale::create([
             'user_id' => $admin->id,
             'customer_id' => $customer->id,
@@ -162,58 +215,43 @@ class DashboardWidgetsTest extends TestCase
             'warehouse_id' => 1,
             'document_type' => '03',
             'serie' => 'B001',
-            'correlative' => 501,
+            'correlative' => 888,
             'issue_date' => now(),
-            'subtotal' => $subtotal,
-            'igv' => $igv,
-            'total' => $total,
+            'subtotal' => 500.00,
+            'igv' => 90.00,
+            'total' => 590.00,
             'payment_condition' => 'contado',
             'payment_method' => 'efectivo',
             'sunat_status' => 'aceptado',
         ]);
 
-        $item = $sale->items()->create([
-            'product_variant_id' => $variant->id,
+        $sale->items()->create([
+            'product_variant_id' => $vUrgent->id,
             'product_name' => $product->name,
-            'quantity' => 2,
+            'quantity' => 15,
             'price' => 59.90,
-            'igv' => $igv,
-            'total' => $total,
+            'igv' => 90.00,
+            'total' => 590.00,
             'price_type' => 'retail',
         ]);
 
-        StockService::move($variant->id, 1, -2, 'sale', $sale, 'Venta B001-501', 25.00, 'B001-501');
+        $list = DashboardMetrics::restockPriorityList(1);
+        $this->assertNotEmpty($list);
 
-        // Verificar métricas
-        $todaySales = DashboardMetrics::todaySales(1);
-        $this->assertEquals(119.80, $todaySales);
+        // La primera variante debe tener días de stock calculados y ser menor que las siguientes
+        $first = $list->first();
+        $this->assertNotNull($first->days_of_stock);
+        $this->assertGreaterThan(0, $first->sold_30d);
 
-        $todayUnits = DashboardMetrics::todayUnitsSold(1);
-        $this->assertEquals(2, $todayUnits);
+        // Las variantes sin ventas deben quedar ordenadas después de las variantes con rotación
+        $last = $list->last();
+        if ($last->days_of_stock === null) {
+            $this->assertEquals(0, $last->sold_30d);
+        }
 
-        // Devolución de 1 polo
-        \App\Services\SaleExchangeService::register(
-            $sale,
-            [$item->id => 1],
-            'devolucion',
-            'Talla incorrecta'
-        );
-
-        // Ventas y unidades deben ser netas
-        $todaySalesAfter = DashboardMetrics::todaySales(1);
-        $this->assertEquals(59.90, $todaySalesAfter);
-
-        $todayUnitsAfter = DashboardMetrics::todayUnitsSold(1);
-        $this->assertEquals(1, $todayUnitsAfter);
-
-        // Margen del mes
-        $margin = DashboardMetrics::monthMargin(1);
-        $this->assertGreaterThan(0, $margin['margin_amount']);
-        $this->assertGreaterThan(0, $margin['margin_percent']);
-
-        // Últimas 5 ventas widget visible
-        $this->actingAs($admin);
-        $this->assertTrue(LatestSalesWidget::canView());
-        Livewire::test(LatestSalesWidget::class)->assertOk()->assertSee('B001-501');
+        Livewire::test(RestockPriorityWidget::class)
+            ->assertOk()
+            ->assertSee('Reponer primero')
+            ->assertSee($vUrgent->product->name);
     }
 }

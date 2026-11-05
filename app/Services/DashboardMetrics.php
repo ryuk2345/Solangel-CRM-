@@ -2,6 +2,11 @@
 
 namespace App\Services;
 
+use App\Filament\Pages\AccountsReceivable;
+use App\Filament\Pages\LowStockReport;
+use App\Filament\Resources\CashRegisterResource;
+use App\Filament\Resources\SaleResource;
+use App\Filament\Resources\StockTransferResource;
 use App\Models\CashRegister;
 use App\Models\CompanySetting;
 use App\Models\Inventory;
@@ -19,390 +24,94 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio centralizado de métricas y consultas para el Panel (Dashboard).
- * 
- * Reglas de negocio:
- * - Ventas válidas: boletas (03), facturas (01) y notas de venta (NV) emitidas.
- * - Excluye ventas anuladas y rechazadas por SUNAT.
- * - Resta notas de crédito y devoluciones de clientes del periodo.
- * - Ventas de hoy y gráfico van en S/ con IGV (ingresos reales a caja).
- * - Margen del mes = Ventas del mes SIN IGV − Costo de ventas del Kardex (sin IGV).
+ * Orientado a acción: "¿cómo vamos?" y "¿qué tengo que hacer?".
  */
 class DashboardMetrics
 {
     /**
-     * Ventas netas de hoy en S/ con IGV (ventas brutas menos devoluciones).
+     * Ventas netas de hoy en S/ con IGV y cantidad de comprobantes emitidos.
+     *
+     * @return array{amount: float, count: int}
      */
-    public static function todaySales(?int $branchId = null): float
+    public static function todaySales(?int $branchId = null, ?int $userId = null): array
     {
-        $salesGross = (float) Sale::query()
+        $salesQuery = Sale::query()
             ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
             ->whereDate('issue_date', Carbon::today())
             ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->sum('total');
+            ->when($userId, fn ($q) => $q->where('user_id', $userId));
+
+        $count = (clone $salesQuery)->count();
+        $salesGross = (float) (clone $salesQuery)->sum('total');
 
         $returns = (float) SaleReturn::query()
             ->whereNotIn('sunat_status', ['rechazado'])
             ->whereDate('created_at', Carbon::today())
             ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->when($userId, fn ($q) => $q->where('user_id', $userId))
             ->sum('total');
 
-        return max(0.0, round($salesGross - $returns, 2));
-    }
-
-    /**
-     * Comparación de ventas de hoy vs. el mismo día de la semana pasada.
-     *
-     * @return array{percentage: ?float, label: string, trend: 'up'|'down'|'neutral'}
-     */
-    public static function todaySalesComparison(?int $branchId = null): array
-    {
-        $today = self::todaySales($branchId);
-
-        $lastWeekDate = Carbon::today()->subDays(7);
-        $lastWeekGross = (float) Sale::query()
-            ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
-            ->whereDate('issue_date', $lastWeekDate)
-            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->sum('total');
-
-        $lastWeekReturns = (float) SaleReturn::query()
-            ->whereNotIn('sunat_status', ['rechazado'])
-            ->whereDate('created_at', $lastWeekDate)
-            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->sum('total');
-
-        $lastWeekNet = max(0.0, round($lastWeekGross - $lastWeekReturns, 2));
-        $dayName = Carbon::today()->translatedFormat('D');
-
-        if ($lastWeekNet <= 0) {
-            return [
-                'percentage' => null,
-                'label' => $today > 0 ? "Sin ventas el {$dayName}. pasado" : "Sin ventas registradas",
-                'trend' => $today > 0 ? 'up' : 'neutral',
-            ];
-        }
-
-        $change = round((($today - $lastWeekNet) / $lastWeekNet) * 100, 1);
-        $trend = $change > 0 ? 'up' : ($change < 0 ? 'down' : 'neutral');
-        $sign = $change > 0 ? '+' : '';
-
         return [
-            'percentage' => $change,
-            'label' => "{$sign}{$change}% vs. {$dayName}. pasado",
-            'trend' => $trend,
-        ];
-    }
-
-    /**
-     * Unidades vendidas hoy netas de prendas devueltas.
-     */
-    public static function todayUnitsSold(?int $branchId = null): int
-    {
-        $saleIds = Sale::query()
-            ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
-            ->whereDate('issue_date', Carbon::today())
-            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->pluck('id');
-
-        $grossUnits = (int) SaleItem::whereIn('sale_id', $saleIds)
-            ->whereHas('productVariant.product', fn ($p) => $p->where('is_service', false))
-            ->sum('quantity');
-
-        $returnIds = SaleReturn::query()
-            ->whereNotIn('sunat_status', ['rechazado'])
-            ->whereDate('created_at', Carbon::today())
-            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->pluck('id');
-
-        $returnUnits = (int) SaleReturnItem::whereIn('sale_return_id', $returnIds)
-            ->whereHas('productVariant.product', fn ($p) => $p->where('is_service', false))
-            ->sum('quantity');
-
-        return max(0, $grossUnits - $returnUnits);
-    }
-
-    /**
-     * Total de variantes activas de catálogo (modelos, tallas y colores).
-     */
-    public static function activeVariantsCount(): int
-    {
-        return (int) ProductVariant::where('is_active', true)
-            ->whereHas('product', fn ($p) => $p->where('is_service', false))
-            ->count();
-    }
-
-    /**
-     * Conteo de registros con stock bajo o agotado según umbral del modelo o de la empresa.
-     * Coincide exactamente con el alcance de Inventory::scopeLowStock.
-     */
-    public static function stockAlertsCount(?int $branchId = null): int
-    {
-        $global = CompanySetting::lowStockThreshold();
-
-        return (int) Inventory::query()
-            ->whereHas('productVariant.product', fn ($p) => $p->where('is_service', false))
-            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->whereRaw(
-                'inventories.stock <= COALESCE((SELECT p.low_stock_threshold FROM product_variants v '
-                . 'INNER JOIN products p ON p.id = v.product_id WHERE v.id = inventories.product_variant_id), ?)',
-                [$global],
-            )
-            ->count();
-    }
-
-    /**
-     * Estado de la caja de la tienda: abierta con saldo actual, o cerrada con estado del último cierre.
-     *
-     * @return array{is_open: bool, label: string, description: string, color: string, icon: string}
-     */
-    public static function cashRegisterStatus(?int $branchId = null): array
-    {
-        $query = CashRegister::query();
-        if ($branchId) {
-            $query->where('branch_id', $branchId);
-        }
-
-        $cajaAbierta = (clone $query)->where('status', 'abierta')->latest('opened_at')->first();
-
-        if ($cajaAbierta) {
-            $monto = (float) ($cajaAbierta->expected_amount ?: $cajaAbierta->initial_amount);
-            $usuario = $cajaAbierta->user?->name ?? 'cajero';
-            return [
-                'is_open' => true,
-                'label' => 'Abierta · S/ ' . number_format($monto, 2),
-                'description' => "Turno activo por {$usuario}",
-                'color' => 'success',
-                'icon' => 'heroicon-m-lock-open',
-            ];
-        }
-
-        $ultimoCierre = (clone $query)->where('status', 'cerrada')->latest('closed_at')->first();
-
-        if ($ultimoCierre) {
-            $diff = round((float) $ultimoCierre->actual_amount - (float) $ultimoCierre->expected_amount, 2);
-            if (abs($diff) < 0.01) {
-                return [
-                    'is_open' => false,
-                    'label' => 'Cerrada',
-                    'description' => 'Cuadrada · S/ ' . number_format((float) $ultimoCierre->actual_amount, 2),
-                    'color' => 'gray',
-                    'icon' => 'heroicon-m-lock-closed',
-                ];
-            }
-
-            $sign = $diff > 0 ? '+' : '';
-            return [
-                'is_open' => false,
-                'label' => 'Cerrada',
-                'description' => "Descuadre {$sign}S/ " . number_format($diff, 2) . ' en último cierre',
-                'color' => 'danger',
-                'icon' => 'heroicon-m-exclamation-circle',
-            ];
-        }
-
-        return [
-            'is_open' => false,
-            'label' => 'Cerrada',
-            'description' => 'Sin turnos registrados',
-            'color' => 'gray',
-            'icon' => 'heroicon-m-lock-closed',
-        ];
-    }
-
-    /**
-     * Traspasos en ruta para la tienda o red de tiendas.
-     *
-     * @return array{count: int, units: int, description: string, color: string, icon: string}
-     */
-    public static function transfersInTransit(?int $branchId = null): array
-    {
-        $transferQuery = StockTransfer::where('status', 'en_transito');
-        if ($branchId) {
-            $transferQuery->where(fn ($q) => $q->where('origin_branch_id', $branchId)->orWhere('destination_branch_id', $branchId));
-        }
-
-        $transfers = (clone $transferQuery)->with(['items', 'destinationBranch'])->get();
-        $count = $transfers->count();
-        $totalUnits = (int) $transfers->sum(fn ($t) => $t->items->sum('quantity_sent'));
-
-        $description = match (true) {
-            $count === 0 => 'Sin traspasos pendientes',
-            $count === 1 => "{$totalUnits} prendas hacia " . ($transfers->first()->destinationBranch?->name ?? 'destino'),
-            default => "{$totalUnits} prendas en {$count} envíos entre tiendas",
-        };
-
-        return [
+            'amount' => max(0.0, round($salesGross - $returns, 2)),
             'count' => $count,
-            'units' => $totalUnits,
-            'description' => $description,
-            'color' => $count > 0 ? 'warning' : 'gray',
-            'icon' => 'heroicon-m-truck',
         ];
     }
 
     /**
-     * Ventas de los últimos 14 días con IGV, discriminadas por minorista y mayorista.
+     * Ventas netas del mes en curso con IGV y comparación vs. mes anterior al mismo día.
+     * Solo devuelve comparación si el mes anterior tuvo ventas en ese periodo.
      *
-     * @return array{labels: string[], retail: float[], wholesale: float[]}
+     * @return array{amount: float, comparison_label: ?string}
      */
-    public static function salesLast14Days(?int $branchId = null): array
-    {
-        $labels = [];
-        $retail = [];
-        $wholesale = [];
-
-        for ($i = 13; $i >= 0; $i--) {
-            $date = Carbon::today()->subDays($i);
-            $labels[] = $date->translatedFormat('d/m');
-
-            $items = DB::table('sale_items as si')
-                ->join('sales as s', 's.id', '=', 'si.sale_id')
-                ->join('product_variants as pv', 'pv.id', '=', 'si.product_variant_id')
-                ->join('products as p', 'p.id', '=', 'pv.product_id')
-                ->where('p.is_service', false)
-                ->whereNotIn('s.sunat_status', ['anulado', 'rechazado'])
-                ->whereDate('s.issue_date', $date)
-                ->when($branchId, fn ($q) => $q->where('s.branch_id', $branchId))
-                ->selectRaw("
-                    COALESCE(SUM(CASE WHEN si.price_type = 'wholesale' THEN si.total ELSE 0 END), 0) as wholesale_amount,
-                    COALESCE(SUM(CASE WHEN si.price_type != 'wholesale' THEN si.total ELSE 0 END), 0) as retail_amount
-                ")
-                ->first();
-
-            $returns = DB::table('sale_return_items as ri')
-                ->join('sale_returns as sr', 'sr.id', '=', 'ri.sale_return_id')
-                ->join('sale_items as si', 'si.id', '=', 'ri.sale_item_id')
-                ->whereNotIn('sr.sunat_status', ['rechazado'])
-                ->whereDate('sr.created_at', $date)
-                ->when($branchId, fn ($q) => $q->where('sr.branch_id', $branchId))
-                ->selectRaw("
-                    COALESCE(SUM(CASE WHEN si.price_type = 'wholesale' THEN ri.total ELSE 0 END), 0) as wholesale_returned,
-                    COALESCE(SUM(CASE WHEN si.price_type != 'wholesale' THEN ri.total ELSE 0 END), 0) as retail_returned
-                ")
-                ->first();
-
-            $wNet = max(0.0, round(((float) ($items->wholesale_amount ?? 0)) - ((float) ($returns->wholesale_returned ?? 0)), 2));
-            $rNet = max(0.0, round(((float) ($items->retail_amount ?? 0)) - ((float) ($returns->retail_returned ?? 0)), 2));
-
-            $wholesale[] = $wNet;
-            $retail[] = $rNet;
-        }
-
-        return [
-            'labels' => $labels,
-            'retail' => $retail,
-            'wholesale' => $wholesale,
-        ];
-    }
-
-    /**
-     * Top 5 modelos más vendidos del mes en curso, con unidades netas, total facturado y talla más vendida.
-     *
-     * @return Collection<int, object{id: int, product_id: int, product_name: string, units: int, amount: float, top_size: string}>
-     */
-    public static function top5ModelsThisMonth(?int $branchId = null): Collection
+    public static function monthSales(?int $branchId = null): array
     {
         $startOfMonth = Carbon::now()->startOfMonth();
-        $endOfMonth = Carbon::now()->endOfMonth();
+        $now = Carbon::now();
 
-        $sold = DB::table('sale_items as si')
-            ->join('sales as s', 's.id', '=', 'si.sale_id')
-            ->join('product_variants as pv', 'pv.id', '=', 'si.product_variant_id')
-            ->join('products as p', 'p.id', '=', 'pv.product_id')
-            ->where('p.is_service', false)
-            ->whereNotIn('s.sunat_status', ['anulado', 'rechazado'])
-            ->whereBetween('s.issue_date', [$startOfMonth, $endOfMonth])
-            ->when($branchId, fn ($q) => $q->where('s.branch_id', $branchId))
-            ->selectRaw('p.id as product_id, p.name as product_name, SUM(si.quantity) as gross_units, SUM(si.total) as gross_amount')
-            ->groupBy('p.id', 'p.name')
-            ->get()
-            ->keyBy('product_id');
-
-        if ($sold->isEmpty()) {
-            return collect();
-        }
-
-        $returned = DB::table('sale_return_items as ri')
-            ->join('sale_returns as sr', 'sr.id', '=', 'ri.sale_return_id')
-            ->join('product_variants as pv', 'pv.id', '=', 'ri.product_variant_id')
-            ->join('products as p', 'p.id', '=', 'pv.product_id')
-            ->whereNotIn('sr.sunat_status', ['rechazado'])
-            ->whereBetween('sr.created_at', [$startOfMonth, $endOfMonth])
-            ->when($branchId, fn ($q) => $q->where('sr.branch_id', $branchId))
-            ->selectRaw('p.id as product_id, SUM(ri.quantity) as ret_units, SUM(ri.total) as ret_amount')
-            ->groupBy('p.id')
-            ->get()
-            ->keyBy('product_id');
-
-        $result = collect();
-        foreach ($sold as $productId => $row) {
-            $ret = $returned->get($productId);
-            $netUnits = (int) $row->gross_units - (int) ($ret->ret_units ?? 0);
-            $netAmount = (float) $row->gross_amount - (float) ($ret->ret_amount ?? 0);
-
-            if ($netUnits <= 0) {
-                continue;
-            }
-
-            // Talla más vendida para este modelo en el mes
-            $topSize = DB::table('sale_items as si')
-                ->join('sales as s', 's.id', '=', 'si.sale_id')
-                ->join('product_variants as pv', 'pv.id', '=', 'si.product_variant_id')
-                ->where('pv.product_id', $productId)
-                ->whereNotIn('s.sunat_status', ['anulado', 'rechazado'])
-                ->whereBetween('s.issue_date', [$startOfMonth, $endOfMonth])
-                ->when($branchId, fn ($q) => $q->where('s.branch_id', $branchId))
-                ->selectRaw("COALESCE(pv.size, 'Única') as size_name, SUM(si.quantity) as qty")
-                ->groupBy('size_name')
-                ->orderByDesc('qty')
-                ->value('size_name') ?: '—';
-
-            $result->push((object) [
-                'id' => (int) $productId,
-                'product_id' => (int) $productId,
-                'product_name' => $row->product_name,
-                'units' => $netUnits,
-                'amount' => max(0.0, round($netAmount, 2)),
-                'top_size' => $topSize,
-            ]);
-        }
-
-        return $result->sortByDesc('units')->take(5)->values();
-    }
-
-    /**
-     * Créditos por cobrar vencidos.
-     *
-     * @return array{amount: float, client_count: int, description: string, color: string}
-     */
-    public static function overdueCredit(?int $branchId = null): array
-    {
-        $query = Sale::where('credit_balance', '>', 0)
+        $currentGross = (float) Sale::query()
             ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
-            ->whereDate('due_date', '<', Carbon::today())
-            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId));
+            ->whereBetween('issue_date', [$startOfMonth, $now])
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->sum('total');
 
-        $amount = (float) (clone $query)->sum('credit_balance');
-        $clientCount = (int) (clone $query)->distinct('customer_id')->count('customer_id');
+        $currentReturns = (float) SaleReturn::query()
+            ->whereNotIn('sunat_status', ['rechazado'])
+            ->whereBetween('created_at', [$startOfMonth, $now])
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->sum('total');
+
+        $currentNet = max(0.0, round($currentGross - $currentReturns, 2));
+
+        // Mes anterior hasta el mismo día del mes
+        $prevStart = Carbon::now()->subMonth()->startOfMonth();
+        $prevNow = Carbon::now()->subMonth();
+
+        $prevGross = (float) Sale::query()
+            ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
+            ->whereBetween('issue_date', [$prevStart, $prevNow])
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->sum('total');
+
+        $prevReturns = (float) SaleReturn::query()
+            ->whereNotIn('sunat_status', ['rechazado'])
+            ->whereBetween('created_at', [$prevStart, $prevNow])
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->sum('total');
+
+        $prevNet = max(0.0, round($prevGross - $prevReturns, 2));
+
+        $comparisonLabel = null;
+        if ($prevNet > 0) {
+            $change = round((($currentNet - $prevNet) / $prevNet) * 100, 1);
+            $sign = $change > 0 ? '+' : '';
+            $dayOfMonth = Carbon::now()->day;
+            $comparisonLabel = "{$sign}{$change}% vs. mes anterior al día {$dayOfMonth}";
+        }
 
         return [
-            'amount' => round($amount, 2),
-            'client_count' => $clientCount,
-            'description' => $clientCount > 0
-                ? "{$clientCount} " . ($clientCount === 1 ? 'cliente con mora' : 'clientes con mora')
-                : 'Al día, sin clientes con mora',
-            'color' => $amount > 0 ? 'danger' : 'success',
+            'amount' => $currentNet,
+            'comparison_label' => $comparisonLabel,
         ];
-    }
-
-    /**
-     * Solicitudes de precio mayorista pendientes de aprobación.
-     */
-    public static function pendingPriceApprovalsCount(?int $branchId = null): int
-    {
-        return (int) WholesalePriceRequest::where('status', 'pendiente')
-            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->count();
     }
 
     /**
@@ -427,7 +136,6 @@ class DashboardMetrics
             ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
             ->sum('total');
 
-        // Subtotal de devoluciones = total / 1.18
         $returnsSubtotal = round($returnsTotal / 1.18, 2);
         $netSalesSinIgv = max(0.0, round($salesSubtotal - $returnsSubtotal, 2));
 
@@ -456,14 +164,303 @@ class DashboardMetrics
     }
 
     /**
-     * Determina si hay alguna venta registrada hoy en la tienda especificada.
+     * Resumen de cuentas por cobrar: saldo total, saldo vencido y clientes en mora.
+     *
+     * @return array{total: float, overdue: float, overdue_clients: int}
      */
-    public static function todayHasSales(?int $branchId = null): bool
+    public static function receivableSummary(?int $branchId = null): array
     {
-        return Sale::query()
+        $baseQuery = Sale::where('credit_balance', '>', 0)
             ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
-            ->whereDate('issue_date', Carbon::today())
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId));
+
+        $totalReceivable = (float) (clone $baseQuery)->sum('credit_balance');
+
+        $overdueQuery = (clone $baseQuery)->whereDate('due_date', '<', Carbon::today());
+        $overdueAmount = (float) (clone $overdueQuery)->sum('credit_balance');
+        $overdueClients = (int) (clone $overdueQuery)->distinct('customer_id')->count('customer_id');
+
+        return [
+            'total' => round($totalReceivable, 2),
+            'overdue' => round($overdueAmount, 2),
+            'overdue_clients' => $overdueClients,
+        ];
+    }
+
+    /**
+     * Saldo valorizado actual de todo el inventario según el Kardex.
+     */
+    public static function valuedInventoryTotal(?int $branchId = null): float
+    {
+        $warehouseIds = $branchId
+            ? Warehouse::where('branch_id', $branchId)->pluck('id')->all()
+            : null;
+
+        $total = (float) DB::table('stock_movements')
+            ->whereIn('id', function ($q) use ($warehouseIds) {
+                $q->selectRaw('MAX(id)')
+                    ->from('stock_movements')
+                    ->when($warehouseIds, fn ($w) => $w->whereIn('warehouse_id', $warehouseIds))
+                    ->groupBy('product_variant_id', 'warehouse_id');
+            })
+            ->sum('balance_total_cost');
+
+        return max(0.0, round($total, 2));
+    }
+
+    /**
+     * Items que requieren atención operativa inmediata.
+     * Solo genera filas para tipos con casos reales (> 0).
+     *
+     * @return Collection<int, object{id: string, issue: string, detail: string, count: int, url: string, color: string, icon: string}>
+     */
+    public static function attentionItems(?int $branchId = null, bool $forContador = false): Collection
+    {
+        $items = collect();
+
+        // 1. Aprobaciones de precio pendientes (solo Administrador)
+        if (!$forContador) {
+            $pendingApprovals = WholesalePriceRequest::where('status', 'pendiente')
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->count();
+
+            if ($pendingApprovals > 0) {
+                $url = SaleResource::getUrl('index');
+                $items->push((object) [
+                    'id' => 'wholesale_approvals',
+                    'issue' => 'Aprobaciones de precio pendientes',
+                    'detail' => "{$pendingApprovals} " . ($pendingApprovals === 1 ? 'solicitud mayorista por revisar' : 'solicitudes mayoristas por revisar'),
+                    'count' => $pendingApprovals,
+                    'url' => $url,
+                    'color' => 'warning',
+                    'icon' => 'heroicon-m-check-badge',
+                ]);
+            }
+        }
+
+        // 2. Comprobantes no aceptados por SUNAT (pendientes o rechazados)
+        $sunatQuery = Sale::whereIn('document_type', ['01', '03'])
+            ->whereIn('sunat_status', ['pendiente', 'rechazado'])
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId));
+        $sunatCount = $sunatQuery->count();
+
+        if ($sunatCount > 0) {
+            $url = SaleResource::getUrl('index');
+            $items->push((object) [
+                'id' => 'sunat_issues',
+                'issue' => 'Comprobantes no aceptados por SUNAT',
+                'detail' => "{$sunatCount} " . ($sunatCount === 1 ? 'comprobante pendiente o rechazado' : 'comprobantes pendientes o rechazados'),
+                'count' => $sunatCount,
+                'url' => $url,
+                'color' => 'danger',
+                'icon' => 'heroicon-m-exclamation-triangle',
+            ]);
+        }
+
+        // 3. Créditos vencidos
+        $overdueQuery = Sale::where('credit_balance', '>', 0)
+            ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
+            ->whereDate('due_date', '<', Carbon::today())
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId));
+        $overdueCount = $overdueQuery->count();
+        $overdueAmount = (float) (clone $overdueQuery)->sum('credit_balance');
+        $clientCount = (int) (clone $overdueQuery)->distinct('customer_id')->count('customer_id');
+
+        if ($overdueCount > 0) {
+            $url = AccountsReceivable::getUrl();
+            $items->push((object) [
+                'id' => 'overdue_credits',
+                'issue' => 'Créditos vencidos',
+                'detail' => "{$clientCount} " . ($clientCount === 1 ? 'cliente en mora' : 'clientes en mora') . ' · S/ ' . number_format($overdueAmount, 2),
+                'count' => $overdueCount,
+                'url' => $url,
+                'color' => 'danger',
+                'icon' => 'heroicon-m-clock',
+            ]);
+        }
+
+        // 4 y 5 solo aplican al Administrador (el Contador solo ve SUNAT y créditos)
+        if (!$forContador) {
+            // 4. Cajas abiertas de días anteriores o cierres con diferencia
+            $cajasViejas = CashRegister::where('status', 'abierta')
+                ->whereDate('opened_at', '<', Carbon::today())
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->count();
+
+            $cierresConDiff = CashRegister::where('status', 'cerrada')
+                ->whereDate('closed_at', '>=', Carbon::today()->subDays(7))
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->where(fn ($q) => $q->whereNotNull('difference')->where('difference', '!=', 0))
+                ->count();
+
+            $totalCajas = $cajasViejas + $cierresConDiff;
+            if ($totalCajas > 0) {
+                $detailParts = [];
+                if ($cajasViejas > 0) {
+                    $detailParts[] = "{$cajasViejas} abierta(s) de días anteriores";
+                }
+                if ($cierresConDiff > 0) {
+                    $detailParts[] = "{$cierresConDiff} cierre(s) con descuadre";
+                }
+                $url = CashRegisterResource::getUrl('index');
+                $items->push((object) [
+                    'id' => 'cash_register_issues',
+                    'issue' => 'Cajas de días anteriores o con descuadre',
+                    'detail' => implode(' · ', $detailParts),
+                    'count' => $totalCajas,
+                    'url' => $url,
+                    'color' => 'danger',
+                    'icon' => 'heroicon-m-lock-closed',
+                ]);
+            }
+
+            // 5. Traspasos en ruta hace más de 24 h
+            $delayedTransfers = StockTransfer::where('status', 'en_transito')
+                ->where('sent_at', '<', Carbon::now()->subHours(24))
+                ->when($branchId, fn ($q) => $q->where(fn ($w) => $w->where('origin_branch_id', $branchId)->orWhere('destination_branch_id', $branchId)))
+                ->count();
+
+            if ($delayedTransfers > 0) {
+                $url = StockTransferResource::getUrl('index');
+                $items->push((object) [
+                    'id' => 'delayed_transfers',
+                    'issue' => 'Traspasos en ruta demorados (> 24 h)',
+                    'detail' => "{$delayedTransfers} " . ($delayedTransfers === 1 ? 'traspaso sin recepción' : 'traspasos sin recepción'),
+                    'count' => $delayedTransfers,
+                    'url' => $url,
+                    'color' => 'warning',
+                    'icon' => 'heroicon-m-truck',
+                ]);
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Tabla "Reponer primero": máximo 10 variantes con stock <= umbral,
+     * ordenadas por días de stock = stock / (unidades vendidas en 30 días / 30).
+     * Si no se vendió en 30 días, va al final con "sin ventas".
+     *
+     * @return Collection<int, object{id: int, product_name: string, size: string, color_name: string, location_name: string, stock: int, sold_30d: int, days_of_stock: ?float}>
+     */
+    public static function restockPriorityList(?int $branchId = null): Collection
+    {
+        $global = CompanySetting::lowStockThreshold();
+
+        $inventories = Inventory::query()
+            ->with(['productVariant.product', 'warehouse.branch'])
+            ->whereHas('productVariant.product', fn ($p) => $p->where('is_service', false))
             ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-            ->exists();
+            ->whereRaw(
+                'inventories.stock <= COALESCE((SELECT p.low_stock_threshold FROM product_variants v '
+                . 'INNER JOIN products p ON p.id = v.product_id WHERE v.id = inventories.product_variant_id), ?)',
+                [$global],
+            )
+            ->get();
+
+        if ($inventories->isEmpty()) {
+            return collect();
+        }
+
+        // Unidades vendidas en los últimos 30 días por variante
+        $since30d = Carbon::now()->subDays(30)->startOfDay();
+        $sold30d = DB::table('sale_items as si')
+            ->join('sales as s', 's.id', '=', 'si.sale_id')
+            ->whereNotIn('s.sunat_status', ['anulado', 'rechazado'])
+            ->where('s.issue_date', '>=', $since30d)
+            ->groupBy('si.product_variant_id')
+            ->selectRaw('si.product_variant_id, SUM(si.quantity) as sold_qty')
+            ->pluck('sold_qty', 'product_variant_id');
+
+        $returned30d = DB::table('sale_return_items as ri')
+            ->join('sale_returns as sr', 'sr.id', '=', 'ri.sale_return_id')
+            ->whereNotIn('sr.sunat_status', ['rechazado'])
+            ->where('sr.created_at', '>=', $since30d)
+            ->groupBy('ri.product_variant_id')
+            ->selectRaw('ri.product_variant_id, SUM(ri.quantity) as ret_qty')
+            ->pluck('ret_qty', 'product_variant_id');
+
+        $rows = collect();
+        foreach ($inventories as $inv) {
+            $variant = $inv->productVariant;
+            $product = $variant?->product;
+            if (!$variant || !$product) {
+                continue;
+            }
+
+            $vId = $variant->id;
+            $gross = (int) ($sold30d[$vId] ?? 0);
+            $ret = (int) ($returned30d[$vId] ?? 0);
+            $netSold30d = max(0, $gross - $ret);
+
+            $stock = (int) $inv->stock;
+            $daysOfStock = null;
+            if ($netSold30d > 0) {
+                $dailyRate = $netSold30d / 30.0;
+                $daysOfStock = round($stock / $dailyRate, 1);
+            }
+
+            $location = $inv->warehouse?->name ?? 'Almacén';
+            if ($inv->branch && !$branchId) {
+                $location = "{$inv->branch->name} · {$location}";
+            }
+
+            $rows->push((object) [
+                'id' => (int) $inv->id,
+                'product_name' => $product->name,
+                'size' => $variant->size ?: 'Única',
+                'color_name' => $variant->color_name ?: 'Único',
+                'location_name' => $location,
+                'stock' => $stock,
+                'sold_30d' => $netSold30d,
+                'days_of_stock' => $daysOfStock,
+            ]);
+        }
+
+        // Ordenar: primero los que tienen ventas (días de stock asc), al final los que no tienen ventas (stock asc)
+        return $rows->sortBy(function ($item) {
+            return [
+                $item->days_of_stock === null ? 1 : 0,
+                $item->days_of_stock ?? $item->stock,
+            ];
+        })->take(10)->values();
+    }
+
+    /**
+     * Solicitudes de precio del vendedor (pendientes o resueltas hoy).
+     *
+     * @return Collection<int, WholesalePriceRequest>
+     */
+    public static function sellerPriceRequestsToday(int $userId): Collection
+    {
+        return WholesalePriceRequest::with('customer')
+            ->where('requested_by', $userId)
+            ->where(function ($q) {
+                $q->where('status', 'pendiente')
+                    ->orWhereDate('decided_at', Carbon::today())
+                    ->orWhereDate('created_at', Carbon::today());
+            })
+            ->latest()
+            ->take(5)
+            ->get();
+    }
+
+    /**
+     * Traspasos en ruta por recibir en la tienda o almacén del usuario.
+     *
+     * @return Collection<int, StockTransfer>
+     */
+    public static function incomingTransfers(?int $branchId = null): Collection
+    {
+        if (!$branchId) {
+            return collect();
+        }
+
+        return StockTransfer::with(['originBranch', 'originWarehouse', 'items'])
+            ->where('status', 'en_transito')
+            ->where('destination_branch_id', $branchId)
+            ->latest('sent_at')
+            ->get();
     }
 }

@@ -12,8 +12,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Fila 4 (Columna 2): Top 5 modelos más vendidos del mes (unidades, S/ y talla más vendida).
- * Solo visible para Administrador y Contador. Sin polling.
+ * Tabla "Top 5 del mes": Modelo, Unidades, S/ y Talla que más sale.
+ * Solo visible para Administrador cuando existen ventas en el mes.
  */
 class TopModelsWidget extends BaseWidget
 {
@@ -21,11 +21,8 @@ class TopModelsWidget extends BaseWidget
 
     protected static ?string $heading = 'Top 5 modelos del mes';
     protected static ?string $pollingInterval = null;
-
-    protected int | string | array $columnSpan = [
-        'default' => 'full',
-        'md' => 1,
-    ];
+    protected int | string | array $columnSpan = 'full';
+    protected static ?int $sort = 4;
 
     public static function canView(): bool
     {
@@ -35,7 +32,7 @@ class TopModelsWidget extends BaseWidget
         }
 
         return $user->seesAllBranches()
-            || $user->hasRole(['super_admin', 'administrador', 'contador']);
+            || $user->hasRole(['super_admin', 'administrador']);
     }
 
     protected function getBranchId(): ?int
@@ -86,11 +83,11 @@ class TopModelsWidget extends BaseWidget
 
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Total')
-                    ->money('PEN')
+                    ->formatStateUsing(fn ($state) => 'S/ ' . number_format((float) $state, 2))
                     ->alignEnd(),
 
                 Tables\Columns\TextColumn::make('top_size')
-                    ->label('Talla top')
+                    ->label('Talla que más sale')
                     ->badge()
                     ->color('info')
                     ->alignCenter()

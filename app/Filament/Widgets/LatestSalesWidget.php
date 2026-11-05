@@ -11,26 +11,35 @@ use Filament\Widgets\Concerns\InteractsWithPageFilters;
 use Filament\Widgets\TableWidget as BaseWidget;
 
 /**
- * Fila condicional: Últimas 5 ventas del día en vivo (polling 60s).
- * Se oculta automáticamente si no hay ventas hoy o para el rol almacenero.
+ * Tabla compacta "Mis últimas ventas de hoy".
+ * Visible únicamente si existen ventas registradas hoy.
  */
 class LatestSalesWidget extends BaseWidget
 {
     use InteractsWithPageFilters;
 
     protected int | string | array $columnSpan = 'full';
-    protected static ?string $heading = 'Últimas 5 ventas de hoy';
     protected static ?string $pollingInterval = '60s';
+    protected static ?int $sort = 5;
 
     public static function canView(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->hasRole('almacenero')) {
+        if (!$user || $user->hasRole(['almacenero', 'contador'])) {
             return false;
         }
 
+        $userId = $user->hasRole('vendedor') && !$user->seesAllBranches() ? $user->id : null;
         $branchId = !$user->seesAllBranches() ? ($user->branch_id ?? 1) : null;
-        return DashboardMetrics::todayHasSales($branchId);
+
+        return DashboardMetrics::todaySales($branchId, $userId)['count'] > 0;
+    }
+
+    public function getTableHeading(): ?string
+    {
+        return auth()->user()?->hasRole('vendedor') && !auth()->user()?->seesAllBranches()
+            ? 'Mis últimas ventas de hoy'
+            : 'Últimas 5 ventas de hoy';
     }
 
     protected function getBranchId(): ?int
@@ -45,6 +54,8 @@ class LatestSalesWidget extends BaseWidget
 
     public function table(Table $table): Table
     {
+        $user = auth()->user();
+        $isSeller = $user?->hasRole('vendedor') && !$user?->seesAllBranches();
         $branchId = $this->getBranchId();
 
         $query = Sale::query()
@@ -52,6 +63,7 @@ class LatestSalesWidget extends BaseWidget
             ->whereNotIn('sunat_status', ['anulado', 'rechazado'])
             ->whereDate('issue_date', Carbon::today())
             ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->when($isSeller, fn ($q) => $q->where('user_id', $user?->id))
             ->latest('created_at')
             ->limit(5);
 
@@ -80,7 +92,7 @@ class LatestSalesWidget extends BaseWidget
 
                 Tables\Columns\TextColumn::make('total')
                     ->label('Total')
-                    ->money('PEN')
+                    ->formatStateUsing(fn ($state) => 'S/ ' . number_format((float) $state, 2))
                     ->weight('bold')
                     ->alignEnd(),
             ])

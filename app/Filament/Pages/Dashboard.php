@@ -3,7 +3,6 @@
 namespace App\Filament\Pages;
 
 use App\Models\Branch;
-use App\Models\Category;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Form;
@@ -30,10 +29,9 @@ class Dashboard extends BaseDashboard
         $user = auth()->user();
         $canFilterBranch = $user?->seesAllBranches() ?? false;
 
-        $defaultCategoryId = Category::whereHas('products.variants.inventories', fn ($q) => $q->where('stock', '>', 0))
-            ->orderBy('name')
-            ->value('id')
-            ?: Category::orderBy('name')->value('id');
+        if (!$canFilterBranch) {
+            return $form->schema([]);
+        }
 
         return $form
             ->schema([
@@ -44,34 +42,32 @@ class Dashboard extends BaseDashboard
                             ->label('Tienda')
                             ->options(Branch::pluck('name', 'id'))
                             ->placeholder('Todas las tiendas')
-                            ->visible($canFilterBranch)
                             ->default(null),
-
-                        Select::make('category_id')
-                            ->label('Categoría (Stock por talla)')
-                            ->options(Category::orderBy('name')->pluck('name', 'id'))
-                            ->default($defaultCategoryId)
-                            ->required(),
-                    ])
-                    ->columns($canFilterBranch ? 2 : 1),
+                    ]),
             ]);
     }
 
     public function getColumns(): int | string | array
     {
-        return 2;
+        return 1;
     }
 
     public function getWidgets(): array
     {
         return [
-            \App\Filament\Widgets\StatsOverview::class,
-            \App\Filament\Widgets\StockBySizeWidget::class,
-            \App\Filament\Widgets\ShopCashWidget::class,
-            \App\Filament\Widgets\InTransitTransfersWidget::class,
-            \App\Filament\Widgets\SalesBreakdownChart::class,
+            // Fila 1 (según rol)
+            \App\Filament\Widgets\AdminStatsOverview::class,
+            \App\Filament\Widgets\ContadorStatsOverview::class,
+            \App\Filament\Widgets\SellerStatsOverview::class,
+
+            // Incidencias y reposición urgente
+            \App\Filament\Widgets\NeedsAttentionWidget::class,
+            \App\Filament\Widgets\RestockPriorityWidget::class,
+
+            // Específicos por rol
             \App\Filament\Widgets\TopModelsWidget::class,
-            \App\Filament\Widgets\AdminFinancialStats::class,
+            \App\Filament\Widgets\SellerPriceRequestsWidget::class,
+            \App\Filament\Widgets\IncomingTransfersWidget::class,
             \App\Filament\Widgets\LatestSalesWidget::class,
         ];
     }
