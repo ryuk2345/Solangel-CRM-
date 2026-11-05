@@ -27,9 +27,10 @@ class Dashboard extends BaseDashboard
     public function filtersForm(Form $form): Form
     {
         $user = auth()->user();
-        $canFilterBranch = $user?->seesAllBranches() ?? false;
+        $canFilterBranch = $user?->seesAllBranches()
+            || $user?->hasRole(['admin', 'super_admin', 'contador']);
 
-        if (!$canFilterBranch) {
+        if (! $canFilterBranch) {
             return $form->schema([]);
         }
 
@@ -49,26 +50,28 @@ class Dashboard extends BaseDashboard
 
     public function getColumns(): int | string | array
     {
-        return 1;
+        return 12;
     }
 
     public function getWidgets(): array
     {
         return [
-            // Fila 1 (según rol)
-            \App\Filament\Widgets\AdminStatsOverview::class,
-            \App\Filament\Widgets\ContadorStatsOverview::class,
-            \App\Filament\Widgets\SellerStatsOverview::class,
+            // Fila 0: Bienvenida y salir (nativo de Filament en español)
+            \Filament\Widgets\AccountWidget::class,
 
-            // Incidencias y reposición urgente
-            \App\Filament\Widgets\NeedsAttentionWidget::class,
-            \App\Filament\Widgets\RestockPriorityWidget::class,
+            // Fila 1: Prendas en stock · Alertas de stock · Por cobrar
+            \App\Filament\Widgets\InventoryStats::class,
 
-            // Específicos por rol
-            \App\Filament\Widgets\TopModelsWidget::class,
-            \App\Filament\Widgets\SellerPriceRequestsWidget::class,
-            \App\Filament\Widgets\IncomingTransfersWidget::class,
-            \App\Filament\Widgets\LatestSalesWidget::class,
+            // Fila 2: Ventas de hoy · Ventas del mes · Cajas abiertas · Ventas por aprobar
+            \App\Filament\Widgets\SalesStats::class,
+            \App\Filament\Widgets\PendingApprovalsStat::class,
+
+            // Fila 3: Ventas de los últimos 7 días · Ingresos por método de pago
+            \App\Filament\Widgets\SalesChart::class,
+            \App\Filament\Widgets\PaymentMethodsChart::class,
+
+            // Fila 4: Más vendidos del mes
+            \App\Filament\Widgets\TopSellingProductsWidget::class,
         ];
     }
 }
