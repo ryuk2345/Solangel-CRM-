@@ -24,30 +24,9 @@ class SaleResource extends Resource
     protected static ?string $model = Sale::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-shopping-cart';
-    protected static ?string $navigationGroup = '1. Ventas y Cajas'; 
-    protected static ?int $navigationSort = 1; 
+    protected static ?string $navigationGroup = 'Ventas y cajas'; 
+    protected static ?int $navigationSort = 2; 
     protected static ?string $modelLabel = 'Venta';
-
-    public static function getNavigationItems(): array
-    {
-        return [
-            NavigationItem::make(static::getNavigationLabel())
-                ->group(static::getNavigationGroup())
-                ->icon(static::getNavigationIcon())
-                ->activeIcon(static::getActiveNavigationIcon())
-                ->isActiveWhen(fn () => request()->routeIs(static::getRouteBaseName() . '.*') && !request()->has('tableFilters.con_notas') && !request()->has('con_notas'))
-                ->sort(static::getNavigationSort())
-                ->badge(static::getNavigationBadge(), color: static::getNavigationBadgeColor())
-                ->url(static::getUrl()),
-
-            NavigationItem::make('Notas de Crédito y Débito')
-                ->group(static::getNavigationGroup())
-                ->icon('heroicon-o-document-duplicate')
-                ->isActiveWhen(fn () => request()->routeIs(static::getRouteBaseName() . '.*') && (request()->input('tableFilters.con_notas.isActive') == 'true' || request()->input('tableFilters.con_notas.isActive') == '1' || request()->boolean('con_notas')))
-                ->sort((static::getNavigationSort() ?? 1) + 1)
-                ->url(static::getUrl('index', ['tableFilters[con_notas][isActive]' => 'true'])),
-        ];
-    }
 
     public static function form(Form $form): Form
     {
@@ -83,9 +62,10 @@ class SaleResource extends Resource
                         Forms\Components\Grid::make(12)
                             ->schema([
                                 Forms\Components\Toggle::make('is_quick_sale')
-                                    ->label('⚡ Venta Rápida / Genérica (Cargar descripción y total sin detallar repuestos)')
-                                    ->live()
-                                    ->dehydrated()
+                                    ->label('⚡ Venta rápida (función retirada; solo consulta de ventas antiguas)')
+                                    ->visible(fn (?Sale $record) => (bool) $record?->is_quick_sale)
+                                    ->disabled()
+                                    ->dehydrated(false)
                                     ->afterStateUpdated(function (Set $set) {
                                         $set('items', []);
                                     })
@@ -100,6 +80,11 @@ class SaleResource extends Resource
                                     ->getSearchResultsUsing(fn (string $search): array => \App\Models\Customer::searchByTerm($search, 50))
                                     ->preload()
                                     ->required()
+                                    ->live()
+                                    ->afterStateUpdated(function (Get $get, Set $set) {
+                                        $set('wholesale_request_id', null);
+                                        \App\Support\SaleCart::recalc($get, $set);
+                                    })
                                     ->prefixIcon('heroicon-m-user')
                                     ->columnSpan(['default' => 12, 'md' => 6])
                                     ->createOptionForm([
@@ -153,7 +138,7 @@ class SaleResource extends Resource
                                         modifyQueryUsing: function ($query, string $operation) {
                                             if ($operation === 'create') {
                                                 $user = Auth::user();
-                                                if ($user && $user->hasRole('super_admin')) {
+                                                if ($user && $user->seesAllBranches()) {
                                                     $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
                                                     return $query->whereHas('cashRegisters', function ($q) use ($hoyLima) {
                                                         $q->where('status', 'abierta')
@@ -169,7 +154,7 @@ class SaleResource extends Resource
                                     ->prefixIcon('heroicon-m-building-storefront')
                                     ->default(function () {
                                         $user = Auth::user();
-                                        if ($user && $user->hasRole('super_admin')) {
+                                        if ($user && $user->seesAllBranches()) {
                                             $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
                                             if ($user->branch_id && \App\Models\CashRegister::where('branch_id', $user->branch_id)->where('status', 'abierta')->where('opened_at', '>=', $hoyLima)->exists()) {
                                                 return $user->branch_id;
@@ -178,7 +163,7 @@ class SaleResource extends Resource
                                         }
                                         return Auth::user()?->branch_id;
                                     })
-                                    ->disabled(fn () => !Auth::user()?->hasRole('super_admin'))
+                                    ->disabled(fn () => !Auth::user()?->seesAllBranches())
                                     ->dehydrated()
                                     ->afterStateUpdated(function (Set $set, $state) {
                                         $set('serie', null);
@@ -207,7 +192,7 @@ class SaleResource extends Resource
                                     ->live()
                                     ->prefixIcon('heroicon-m-home-modern')
                                     ->helperText('Almacén que descuenta stock')
-                                    ->disabled(fn () => !Auth::user()?->hasRole('super_admin'))
+                                    ->disabled(fn () => !Auth::user()?->seesAllBranches())
                                     ->dehydrated()
                                     ->afterStateUpdated(function (Set $set) {
                                         $set('items', []);
@@ -327,328 +312,421 @@ class SaleResource extends Resource
                 // ==========================================
                 // 2. DETALLE: PRODUCTOS Y SERVICIOS
                 // ==========================================
-                Forms\Components\Section::make('Detalle de Repuestos y Servicios')
+                Forms\Components\Section::make('Detalle de Prendas')
+                    ->key('detalle')
                     ->visible(fn(Get $get) => !$get('is_quick_sale'))
-                    // 🌟 EL BOTÓN SE MUEVE AL ENCABEZADO DE LA SECCIÓN
                     ->headerActions([
+                        // Lectora de código de barras: escanear agrega la prenda (o suma 1 si ya está)
+                        Forms\Components\Actions\Action::make('scan')
+                            ->label('Escanear / código')
+                            ->icon('heroicon-o-qr-code')
+                            ->color('gray')
+                            ->modalHeading('Escanear prenda')
+                            ->modalSubmitActionLabel('Agregar')
+                            ->form([
+                                Forms\Components\TextInput::make('code')
+                                    ->label('Código de barras o SKU')
+                                    ->autofocus()
+                                    ->required(),
+                                Forms\Components\TextInput::make('quantity')
+                                    ->label('Cantidad')
+                                    ->numeric()->minValue(1)->default(1)->required(),
+                            ])
+                            ->action(function (array $data, Get $get, Set $set) {
+                                $variant = \App\Support\SaleCart::findByCode($data['code']);
+                                if (!$variant || $variant->product?->is_service) {
+                                    Notification::make()->title('No se encontró una prenda con ese código')->danger()->send();
+                                    return;
+                                }
+                                $warehouseId = \App\Support\SaleCart::warehouseFor($get('branch_id'), $get('warehouse_id'));
+                                $items = collect($get('items') ?? [])->filter(fn ($i) => !empty($i['product_variant_id']))->all();
+                                $qty = (int) $data['quantity'];
+                                $existingKey = collect($items)->search(fn ($i) => (int) $i['product_variant_id'] === $variant->id);
+                                $inCart = $existingKey !== false ? (int) $items[$existingKey]['quantity'] : 0;
+                                $stock = $variant->stockIn($warehouseId);
+                                if ($inCart + $qty > $stock) {
+                                    Notification::make()->title('Stock insuficiente')
+                                        ->body("{$variant->display_name}: hay {$stock} en este almacén.")->danger()->send();
+                                    return;
+                                }
+                                if ($existingKey !== false) {
+                                    $items[$existingKey]['quantity'] = $inCart + $qty;
+                                } else {
+                                    $items[(string) \Illuminate\Support\Str::uuid()] = [
+                                        'product_variant_id' => $variant->id,
+                                        'quantity' => $qty,
+                                        'product_name' => $variant->display_name,
+                                        'price' => 0,
+                                    ];
+                                }
+                                $set('items', $items);
+                                \App\Support\SaleCart::recalc($get, $set);
+                            }),
+
+                        // Selector visual: modelo → color → talla (con el stock de cada una)
+                        Forms\Components\Actions\Action::make('pick_model')
+                            ->label('Elegir por modelo')
+                            ->icon('heroicon-o-swatch')
+                            ->color('primary')
+                            ->modalHeading('Elegir prenda por modelo, color y talla')
+                            ->modalSubmitActionLabel('Agregar a la venta')
+                            ->form(function (Get $get) {
+                                $branchId = $get('branch_id');
+                                $warehouseId = \App\Support\SaleCart::warehouseFor($branchId, $get('warehouse_id'));
+
+                                return [
+                                    Forms\Components\Select::make('product_id')
+                                        ->label('Modelo')
+                                        ->searchable()
+                                        ->getSearchResultsUsing(fn (string $search) => \App\Models\Product::query()
+                                            ->where('is_service', false)
+                                            ->whereHas('branches', fn ($b) => $b->where('branches.id', $branchId))
+                                            ->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%"))
+                                            ->limit(30)->get()
+                                            ->mapWithKeys(fn ($p) => [$p->id => $p->name . ' · S/ ' . number_format((float) $p->sale_price, 2)]))
+                                        ->getOptionLabelUsing(fn ($value) => \App\Models\Product::find($value)?->name)
+                                        ->required()
+                                        ->live()
+                                        ->afterStateUpdated(function (Set $set) {
+                                            $set('color', null);
+                                            $set('variant_id', null);
+                                        }),
+                                    Forms\Components\ToggleButtons::make('color')
+                                        ->label('Color')
+                                        ->inline()
+                                        ->visible(fn (Get $get) => filled($get('product_id')))
+                                        ->options(fn (Get $get) => \App\Models\ProductVariant::where('product_id', $get('product_id'))
+                                            ->whereNotNull('color_name')->orderBy('color_id')->pluck('color_name', 'color_name')->unique()->all())
+                                        ->required()
+                                        ->live()
+                                        ->afterStateUpdated(fn (Set $set) => $set('variant_id', null)),
+                                    Forms\Components\ToggleButtons::make('variant_id')
+                                        ->label('Talla (stock en este almacén)')
+                                        ->inline()
+                                        ->visible(fn (Get $get) => filled($get('color')))
+                                        ->options(fn (Get $get) => \App\Models\ProductVariant::with('sizeOption')
+                                            ->where('product_id', $get('product_id'))->where('color_name', $get('color'))
+                                            ->get()->sortBy(fn ($v) => $v->sizeOption?->sort_order ?? 999)
+                                            ->mapWithKeys(fn ($v) => [$v->id => $v->size . ' (' . $v->stockIn($warehouseId) . ')'])
+                                            ->all())
+                                        ->disableOptionWhen(fn (string $value) => (\App\Models\ProductVariant::find($value)?->stockIn($warehouseId) ?? 0) <= 0)
+                                        ->helperText('Las tallas en gris no tienen stock en este almacén.')
+                                        ->required(),
+                                    Forms\Components\TextInput::make('quantity')->label('Cantidad')->numeric()->minValue(1)->default(1)->required(),
+                                ];
+                            })
+                            ->action(function (array $data, Get $get, Set $set) {
+                                $variant = \App\Models\ProductVariant::with('product')->find($data['variant_id']);
+                                if (!$variant) {
+                                    return;
+                                }
+                                $warehouseId = \App\Support\SaleCart::warehouseFor($get('branch_id'), $get('warehouse_id'));
+                                $items = collect($get('items') ?? [])->filter(fn ($i) => !empty($i['product_variant_id']))->all();
+                                $existingKey = collect($items)->search(fn ($i) => (int) $i['product_variant_id'] === $variant->id);
+                                $inCart = $existingKey !== false ? (int) $items[$existingKey]['quantity'] : 0;
+                                $qty = (int) $data['quantity'];
+                                if ($inCart + $qty > $variant->stockIn($warehouseId)) {
+                                    Notification::make()->title('Stock insuficiente')
+                                        ->body("{$variant->display_name}: hay {$variant->stockIn($warehouseId)} en este almacén.")->danger()->send();
+
+                                    return;
+                                }
+                                if ($existingKey !== false) {
+                                    $items[$existingKey]['quantity'] = $inCart + $qty;
+                                } else {
+                                    $items[(string) \Illuminate\Support\Str::uuid()] = [
+                                        'product_variant_id' => $variant->id,
+                                        'quantity' => $qty,
+                                        'product_name' => $variant->display_name,
+                                        'price' => 0,
+                                    ];
+                                }
+                                $set('items', $items);
+                                \App\Support\SaleCart::recalc($get, $set);
+                            }),
+
+                        // Delivery: solo si alguna prenda del detalle lo permite (decisión 4)
                         Forms\Components\Actions\Action::make('add_service')
-                            ->label('Añadir Servicio')
-                            ->icon('heroicon-o-wrench-screwdriver')
+                            ->label('Agregar delivery')
+                            ->icon('heroicon-o-truck')
                             ->color('warning')
                             ->form([
                                 Forms\Components\Select::make('product_variant_id')
-                                    ->label('Seleccionar Servicio')
-                                    ->options(function () {
-                                        return \App\Models\ProductVariant::whereHas('product', function ($query) {
-                                            $query->where('is_service', true);
-                                        })->get()->mapWithKeys(function ($variant) {
-                                            return [$variant->id => "🔧 " . ($variant->product?->name ?? 'Servicio')];
-                                        });
-                                    })
-                                    ->searchable()
+                                    ->label('Servicio')
+                                    ->options(fn () => \App\Models\ProductVariant::whereHas('product', fn ($q) => $q->where('is_service', true))
+                                        ->with('product')->get()
+                                        ->mapWithKeys(fn ($v) => [$v->id => '🚚 ' . ($v->product?->name ?? 'Delivery')]))
                                     ->required()
                                     ->live()
-                                    ->afterStateUpdated(function ($state, Forms\Set $set) {
-                                        $variante = \App\Models\ProductVariant::find($state);
-                                        if ($variante && $variante->product) {
-                                            $set('price', $variante->product->sale_price ?? 0);
-                                        }
-                                    }),
-                                    
+                                    ->afterStateUpdated(fn ($state, Set $set) => $set('price', \App\Models\ProductVariant::find($state)?->retail_price ?? 0)),
                                 Forms\Components\TextInput::make('price')
-                                    ->label('Precio Acordado')
-                                    ->numeric()
-                                    ->prefix('S/')
-                                    ->required(),
-                                    
-                                Forms\Components\TextInput::make('quantity')
-                                    ->label('Cantidad')
-                                    ->numeric()
-                                    ->default(1)
-                                    ->required(),
+                                    ->label('Precio del delivery')
+                                    ->numeric()->minValue(0.01)->prefix('S/')->required(),
                             ])
-                            ->action(function (array $data, Forms\Set $set, Forms\Get $get) {
-                                $items = $get('items') ?? [];
-                                $uuid = (string) \Illuminate\Support\Str::uuid();
-                                
-                                $variante = \App\Models\ProductVariant::find($data['product_variant_id']);
-                                $precio = (float) $data['price'];
-                                $cant = (int) $data['quantity'];
-                                $totalLinea = $precio * $cant;
-                                
-                                $items[$uuid] = [
-                                    'product_variant_id' => $data['product_variant_id'],
-                                    'quantity' => $cant,
-                                    'price' => $precio,
-                                    'total' => number_format($totalLinea, 2, '.', ''),
-                                    'igv' => round($totalLinea - ($totalLinea / 1.18), 2),
-                                    'product_name' => ($variante && $variante->product) ? $variante->product->name : 'Servicio',
-                                    'max_stock' => 999999, 
+                            ->action(function (array $data, Get $get, Set $set) {
+                                $items = collect($get('items') ?? [])->filter(fn ($i) => !empty($i['product_variant_id']))->all();
+                                if (!\App\Support\SaleCart::allowsDelivery($items)) {
+                                    Notification::make()->title('Delivery no disponible')
+                                        ->body('Ninguna prenda de esta venta permite delivery. Se habilita en cada modelo ("Permite delivery").')
+                                        ->danger()->send();
+                                    return;
+                                }
+                                $variant = \App\Models\ProductVariant::with('product')->find($data['product_variant_id']);
+                                $items[(string) \Illuminate\Support\Str::uuid()] = [
+                                    'product_variant_id' => $variant->id,
+                                    'quantity' => 1,
+                                    'price' => (float) $data['price'],
+                                    'product_name' => $variant->product?->name ?? 'Delivery',
                                 ];
-                                
                                 $set('items', $items);
+                                \App\Support\SaleCart::recalc($get, $set);
                             }),
                     ])
                     ->schema([
+                        Forms\Components\Placeholder::make('price_mode_view')
+                            ->hiddenLabel()
+                            ->content(fn (Get $get) => new \Illuminate\Support\HtmlString(
+                                '<div class="text-base font-bold">' . e(\App\Support\SaleCart::summary($get)) . '</div>'
+                            )),
+
                         Forms\Components\Repeater::make('items')
-                            ->hiddenLabel() 
+                            ->hiddenLabel()
                             ->relationship('items')
-                            ->addActionLabel('➕ Agregar Repuesto')
+                            ->addActionLabel('➕ Agregar prenda')
                             ->hidden(fn(Get $get) => (bool)$get('is_quick_sale'))
-                            ->defaultItems(1) 
+                            ->defaultItems(1)
+                            ->live()
+                            ->afterStateUpdated(fn (Get $get, Set $set) => \App\Support\SaleCart::recalc($get, $set))
+                            ->deleteAction(fn ($action) => $action->after(fn (Get $get, Set $set) => \App\Support\SaleCart::recalc($get, $set)))
                             ->schema([
-                                Forms\Components\Grid::make(12) 
+                                Forms\Components\Grid::make(12)
                                     ->schema([
                                         Forms\Components\Select::make('product_variant_id')
-                                            ->label('Repuesto o Servicio')
+                                            ->label('Prenda (modelo / color / talla)')
                                             ->searchable()
-                                            ->getSearchResultsUsing(function (string $search, Get $get) {
-                                                $branchId = $get('../../branch_id');
-                                                $warehouseId = $get('../../warehouse_id');
-                                                if (!$branchId) return [];
-
-                                                if (!$warehouseId) {
-                                                    $warehouseId = \App\Models\Warehouse::where('branch_id', $branchId)->where('is_default', true)->value('id')
-                                                        ?? \App\Models\Warehouse::where('branch_id', $branchId)->value('id');
-                                                }
-
-                                                // Asegurar el producto y variante comodín
-                                                $genericProduct = \App\Models\Product::firstOrCreate(
-                                                    ['name' => 'Repuesto Varios / Genérico'],
-                                                    [
-                                                        'is_service' => true,
-                                                        'sale_price' => 0,
-                                                        'is_web_visible' => false,
-                                                    ]
-                                                );
-                                                $genericVariant = \App\Models\ProductVariant::firstOrCreate(
-                                                    ['product_id' => $genericProduct->id],
-                                                    [
-                                                        'sku' => 'REPE-GENERICO',
-                                                        'color_name' => 'Único',
-                                                        'size' => 'Único',
-                                                        
-                                                    ]
-                                                );
-
-                                                $opciones = [
-                                                    $genericVariant->id => "⭐ [REPE-GENERICO] Repuesto Varios / Genérico (Editar nombre y precio)"
-                                                ];
-
-                                                $query = \App\Models\Inventory::with(['productVariant.product'])
-                                                    ->whereHas('productVariant.product.branches', function ($b) use ($branchId) {
-                                                        $b->where('branches.id', $branchId);
-                                                    });
-
-                                                if ($warehouseId) {
-                                                    $query->where('warehouse_id', $warehouseId);
-                                                } else {
-                                                    $query->where('branch_id', $branchId);
-                                                }
-
-                                                if (!empty($search)) {
-                                                    $query->whereHas('productVariant', function ($q) use ($search) {
-                                                        $q->where('sku', 'like', "%{$search}%")
-                                                          ->orWhereHas('product', function ($qp) use ($search) {
-                                                              $qp->where('name', 'like', "%{$search}%");
-                                                          });
-                                                    })
-                                                    ->orderByRaw("CASE 
-                                                        WHEN EXISTS (
-                                                            SELECT 1 FROM product_variants 
-                                                            WHERE product_variants.id = inventories.product_variant_id 
-                                                            AND product_variants.sku = ?
-                                                        ) THEN 1 
-                                                        WHEN EXISTS (
-                                                            SELECT 1 FROM product_variants 
-                                                            WHERE product_variants.id = inventories.product_variant_id 
-                                                            AND product_variants.sku LIKE ?
-                                                        ) THEN 2 
-                                                        ELSE 3 
-                                                    END", [$search, $search . '%']);
-                                                }
-
-                                                $inventarios = $query->limit(50)->get();
-
-                                                foreach ($inventarios as $inv) {
-                                                    $variant = $inv->productVariant;
-                                                    if (!$variant || !$variant->product) continue;
-                                                    $prefix = $inv->stock <= 0 ? '⚠️ [SIN STOCK] ' : '';
-                                                    $opciones[$variant->id] = "{$prefix}[{$variant->sku}] {$variant->product->name} - [{$variant->color_name} / {$variant->size}] (Stock: {$inv->stock})";
-                                                }
-
-                                                $serviciosQuery = \App\Models\ProductVariant::with('product')
-                                                    ->whereHas('product', function($q) {
-                                                        $q->where('is_service', true);
-                                                    });
-
-                                                if (!empty($search)) {
-                                                    $serviciosQuery->whereHas('product', function($q) use ($search) {
-                                                        $q->where('name', 'like', "%{$search}%");
-                                                    });
-                                                }
-
-                                                $servicios = $serviciosQuery->limit(10)->get();
-                                                
-                                                foreach($servicios as $ser) {
-                                                    if ($ser->product) {
-                                                        $opciones[$ser->id] = "🔧 {$ser->product->name} (Servicio)";
-                                                    }
-                                                }
-
-                                                return $opciones;
-                                            })
-                                            ->getOptionLabelUsing(function ($value) {
-                                                $variant = \App\Models\ProductVariant::with(['product'])->find($value);
-                                                if (!$variant) return '';
-                                                if ($variant->sku === 'REPE-GENERICO') {
-                                                    return "⭐ [REPE-GENERICO] Repuesto Varios / Genérico";
-                                                }
-                                                if ($variant->product?->is_service) {
-                                                    return "🔧 {$variant->product->name} (Servicio)";
-                                                }
-                                                $inv = \App\Models\Inventory::where('product_variant_id', $value)->first();
-                                                $stock = $inv ? $inv->stock : 0;
-                                                $prefix = $stock <= 0 ? '⚠️ [SIN STOCK] ' : '';
-                                                return "{$prefix}[{$variant->sku}] {$variant->product?->name} - [{$variant->color_name} / {$variant->size}] (Stock: {$stock})";
-                                            })
+                                            ->getSearchResultsUsing(fn (string $search, Get $get) => \App\Support\SaleCart::options(
+                                                $search,
+                                                $get('../../branch_id') ? (int) $get('../../branch_id') : null,
+                                                $get('../../warehouse_id') ? (int) $get('../../warehouse_id') : null,
+                                            ))
+                                            ->getOptionLabelUsing(fn ($value, Get $get) => \App\Support\SaleCart::optionLabel(
+                                                $value,
+                                                \App\Support\SaleCart::warehouseFor($get('../../branch_id'), $get('../../warehouse_id')),
+                                            ))
                                             ->required()
                                             ->live()
-                                            ->afterStateUpdated(function ($state, Forms\Set $set, Forms\Get $get) {
-                                                $variante = \App\Models\ProductVariant::find($state);
-                                                if ($variante && $variante->product) {
-                                                    if ($variante->sku === 'REPE-GENERICO') {
-                                                        $set('is_generic', true);
-                                                        $set('product_name', '');
-                                                        $set('price', 0);
-                                                        $set('max_stock', 999999);
-                                                        $set('total', 0);
-                                                        $set('igv', 0);
-                                                    } else {
-                                                        $set('is_generic', false);
-                                                        $set('price', $variante->product->sale_price ?? 0);
-                                                        
-                                                        if ($variante->product->is_service) {
-                                                            $set('product_name', "🔧 " . $variante->product->name);
-                                                            $set('max_stock', 999999);
-                                                        } else {
-                                                            $set('product_name', "{$variante->product->name} ({$variante->color_name} - {$variante->size})");
-                                                            $branchId = $get('../../branch_id');
-                                                            $warehouseId = $get('../../warehouse_id');
-                                                            if (!$warehouseId && $branchId) {
-                                                                $warehouseId = \App\Models\Warehouse::where('branch_id', $branchId)->where('is_default', true)->value('id')
-                                                                    ?? \App\Models\Warehouse::where('branch_id', $branchId)->value('id');
-                                                            }
-                                                            $stockQuery = \App\Models\Inventory::where('product_variant_id', $state);
-                                                            if ($warehouseId) {
-                                                                $stockQuery->where('warehouse_id', $warehouseId);
-                                                            } else {
-                                                                $stockQuery->where('branch_id', $branchId);
-                                                            }
-                                                            $stock = $stockQuery->value('stock') ?? 0;
-                                                            $set('max_stock', $stock);
-
-                                                            if ($stock <= 0) {
-                                                                \Filament\Notifications\Notification::make()
-                                                                    ->title('⚠️ Repuesto sin Stock')
-                                                                    ->body('Este repuesto no cuenta con stock disponible en el almacén seleccionado. La venta procederá con stock negativo.')
-                                                                    ->warning()
-                                                                    ->send();
-                                                            }
-                                                        }
-
-                                                        $cant = (int) $get('quantity') ?: 1;
-                                                        $total = (float)($variante->product->sale_price ?? 0) * $cant;
-                                                        $set('total', $total);
-                                                        $set('igv', round($total - ($total / 1.18), 2));
-                                                    }
-                                                }
+                                            ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                                $variant = \App\Models\ProductVariant::with('product')->find($state);
+                                                $set('product_name', $variant?->product?->is_service ? ($variant->product->name) : ($variant?->display_name ?? ''));
+                                                $set('price_reason', null);
+                                                \App\Support\SaleCart::recalc($get, $set, '../../');
                                             })
                                             ->columnSpan(6),
 
                                         Forms\Components\TextInput::make('quantity')
                                             ->label('Cant.')
                                             ->numeric()
+                                            ->minValue(1)
                                             ->default(1)
                                             ->required()
                                             ->live(onBlur: true)
-                                            ->afterStateUpdated(function ($state, Forms\Set $set, Forms\Get $get) {
+                                            ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                                 $variantId = $get('product_variant_id');
-                                                if (!$variantId) return;
-
-                                                // Solo verificar stock para productos reales (no genéricos)
-                                                $variante = \App\Models\ProductVariant::find($variantId);
-                                                if ($variante && $variante->sku !== 'REPE-GENERICO') {
-                                                    $branchId = $get('../../branch_id');
-                                                    $maxStock = (int) \App\Models\Inventory::where('product_variant_id', $variantId)
-                                                        ->where('branch_id', $branchId)
-                                                        ->sum('stock');
-
-                                                    $itemsEnCarrito = $get('../../items') ?? [];
-                                                    $cantidadTotalEnCarrito = 0;
-                                                    foreach ($itemsEnCarrito as $item) {
-                                                        if (($item['product_variant_id'] ?? null) == $variantId) {
-                                                            $cantidadTotalEnCarrito += (int) ($item['quantity'] ?? 0);
+                                                if ($variantId) {
+                                                    $warehouseId = \App\Support\SaleCart::warehouseFor($get('../../branch_id'), $get('../../warehouse_id'));
+                                                    $variant = \App\Models\ProductVariant::with('product')->find($variantId);
+                                                    if ($variant && !$variant->product?->is_service) {
+                                                        $inCart = collect($get('../../items') ?? [])
+                                                            ->where('product_variant_id', $variantId)
+                                                            ->sum(fn ($i) => (int) ($i['quantity'] ?? 0));
+                                                        $stock = $variant->stockIn($warehouseId);
+                                                        if ($inCart > $stock) {
+                                                            Notification::make()
+                                                                ->title('Stock insuficiente')
+                                                                ->body("{$variant->display_name}: hay {$stock} en este almacén y en la venta van {$inCart}. No se podrá guardar así.")
+                                                                ->danger()
+                                                                ->send();
                                                         }
                                                     }
-
-                                                    if ($cantidadTotalEnCarrito > $maxStock) {
-                                                        \Filament\Notifications\Notification::make()
-                                                            ->title('⚠️ Stock Insuficiente')
-                                                            ->body("La cantidad solicitada ({$cantidadTotalEnCarrito}) supera el stock disponible en esta tienda ({$maxStock}). La venta procederá con stock negativo.")
-                                                            ->warning()
-                                                            ->send();
-                                                    }
                                                 }
-
-                                                $precio = (float) ($get('price') ?? 0);
-                                                $totalLinea = $state * $precio;
-                                                $set('total', number_format($totalLinea, 2, '.', ''));
-                                                $set('igv', round($totalLinea - ($totalLinea / 1.18), 2));
+                                                \App\Support\SaleCart::recalc($get, $set, '../../');
                                             })
                                             ->columnSpan(2),
 
                                         Forms\Components\TextInput::make('price')
-                                            ->label('Precio (S/)') 
+                                            ->label('Precio (S/)')
                                             ->numeric()
                                             ->required()
+                                            // Solo el administrador cambia precios a mano (decisión 2)
+                                            ->readOnly(fn () => !Auth::user()?->can('edit_sale_price'))
+                                            ->helperText(fn (Get $get) => match ($get('price_reason')) {
+                                                'manual' => 'Precio a mano',
+                                                'authorized' => 'Mayorista aprobado',
+                                                'quantity' => 'Mayorista por cantidad',
+                                                default => $get('price_type') === 'service' ? 'Servicio' : null,
+                                            })
                                             ->live(onBlur: true)
-                                            ->afterStateUpdated(function ($state, Forms\Set $set, Forms\Get $get) {
-                                                $precio = (float) $state ?: 0;
-                                                $cantidad = (int) ($get('quantity') ?: 1);
-                                                $totalLinea = $precio * $cantidad;
-
-                                                $set('total', number_format($totalLinea, 2, '.', ''));
-                                                $set('igv', round($totalLinea - ($totalLinea / 1.18), 2));
+                                            ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                                if (Auth::user()?->can('edit_sale_price')) {
+                                                    $set('price_reason', 'manual');
+                                                }
+                                                \App\Support\SaleCart::recalc($get, $set, '../../');
                                             })
                                             ->columnSpan(2),
 
                                         Forms\Components\TextInput::make('total')
-                                            ->label('Total (S/)') 
+                                            ->label('Total (S/)')
                                             ->readOnly()
                                             ->extraInputAttributes(['class' => 'font-bold text-right bg-gray-50'])
                                             ->columnSpan(2),
 
                                         Forms\Components\TextInput::make('product_name')
-                                            ->label('📝 Descripción del Repuesto / Servicio (Se imprimirá en el comprobante)')
+                                            ->label('Descripción en el comprobante')
                                             ->required()
-                                            ->placeholder('Selecciona un repuesto arriba o escribe el nombre / placa aquí...')
+                                            ->readOnly()
+                                            ->placeholder('Se completa al elegir la prenda')
                                             ->columnSpan(12),
 
-                                        Forms\Components\Hidden::make('is_generic')
-                                            ->default(false)
-                                            ->dehydrated(false),
                                         Forms\Components\Hidden::make('igv'),
-                                        Forms\Components\Hidden::make('max_stock')->dehydrated(false),
+                                        Forms\Components\Hidden::make('list_price'),
+                                        Forms\Components\Hidden::make('price_type'),
+                                        Forms\Components\Hidden::make('price_reason'),
                                     ]),
                             ]),
+                    ]),
+
+                // ==========================================
+                // CAMBIO DE TALLA / COLOR: saldo a favor de la nota de crédito
+                // ==========================================
+                Forms\Components\Section::make('Cambio de talla o color')
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->visible(fn (Get $get) => filled($get('exchange_return_id')))
+                    ->schema([
+                        Forms\Components\Hidden::make('exchange_return_id')->dehydrated(false),
+                        Forms\Components\Placeholder::make('exchange_info')
+                            ->hiddenLabel()
+                            ->content(function (Get $get) {
+                                $return = \App\Models\SaleReturn::with('sale')->find($get('exchange_return_id'));
+                                if (!$return) {
+                                    return '';
+                                }
+                                $credit = (float) $return->available_credit;
+                                $total = (float) collect($get('items') ?? [])->sum(fn ($i) => (float) ($i['total'] ?? 0));
+                                $nc = $return->credit_note_number ? " (nota de crédito {$return->credit_note_number})" : '';
+
+                                return new \Illuminate\Support\HtmlString(
+                                    '<div class="text-base"><strong>Saldo a favor: S/ ' . number_format($credit, 2) . '</strong>' . e($nc)
+                                    . ' · cambio de ' . e($return->sale?->serie . '-' . $return->sale?->correlative) . '<br>'
+                                    . 'El cliente paga solo la diferencia: <strong>S/ ' . number_format(max(0, $total - $credit), 2) . '</strong></div>'
+                                );
+                            }),
+                    ]),
+
+                // ==========================================
+                // PRECIO MAYORISTA PARA 1 PRENDA (cliente mayorista, con aprobación)
+                // ==========================================
+                Forms\Components\Section::make('Precio mayorista con aprobación')
+                    ->description('Para un cliente mayorista que lleva menos prendas que el mínimo. Lo aprueba un administrador con su PIN.')
+                    ->icon('heroicon-o-shield-check')
+                    ->collapsible()
+                    ->visible(function (Get $get, string $operation) {
+                        if ($operation !== 'create' || $get('is_quick_sale')) {
+                            return false;
+                        }
+                        $customer = $get('customer_id') ? \App\Models\Customer::find($get('customer_id')) : null;
+
+                        return $customer?->customer_type === 'mayorista';
+                    })
+                    ->schema([
+                        Forms\Components\Hidden::make('wholesale_request_id'),
+                        Forms\Components\Placeholder::make('wholesale_request_status')
+                            ->label('Estado')
+                            ->content(function (Get $get) {
+                                $request = $get('wholesale_request_id') ? \App\Models\WholesalePriceRequest::with('decider')->find($get('wholesale_request_id')) : null;
+                                if (!$request) {
+                                    return 'Sin solicitud. Con ' . \App\Models\CompanySetting::wholesaleMinQty() . ' prendas o más el precio mayorista se aplica solo.';
+                                }
+
+                                return match ($request->status) {
+                                    'pendiente' => '⏳ Pendiente: se avisó a los administradores. Pulsa "Ver si ya aprobaron".',
+                                    'aprobada' => '✅ Aprobada por ' . ($request->decider?->name ?? 'administrador') . '.',
+                                    'rechazada' => '❌ Rechazada. ' . ($request->note ?? ''),
+                                    default => ucfirst($request->status),
+                                };
+                            }),
+                        Forms\Components\Actions::make([
+                            Forms\Components\Actions\Action::make('request_wholesale')
+                                ->label('Pedir aprobación al administrador')
+                                ->icon('heroicon-o-bell-alert')
+                                ->color('warning')
+                                ->visible(fn (Get $get) => blank($get('wholesale_request_id')))
+                                ->form([
+                                    Forms\Components\TextInput::make('note')->label('Motivo (opcional)')->maxLength(200),
+                                ])
+                                ->action(function (array $data, Get $get, Set $set) {
+                                    try {
+                                        $request = \App\Services\WholesaleApprovalService::request(
+                                            $get('customer_id'), $get('branch_id'), $get('items') ?? [], Auth::user(), $data['note'] ?? null,
+                                        );
+                                    } catch (\Illuminate\Validation\ValidationException $e) {
+                                        Notification::make()->title(collect($e->errors())->flatten()->first())->danger()->send();
+                                        return;
+                                    }
+                                    $set('wholesale_request_id', $request->id);
+                                    Notification::make()->title('Solicitud enviada')->body('Los administradores recibieron el aviso.')->success()->send();
+                                }),
+
+                            Forms\Components\Actions\Action::make('check_wholesale')
+                                ->label('Ver si ya aprobaron')
+                                ->icon('heroicon-o-arrow-path')
+                                ->color('gray')
+                                ->visible(fn (Get $get) => filled($get('wholesale_request_id')))
+                                ->action(function (Get $get, Set $set) {
+                                    $request = \App\Models\WholesalePriceRequest::find($get('wholesale_request_id'));
+                                    if ($request?->status === 'rechazada') {
+                                        $set('wholesale_request_id', null);
+                                        Notification::make()->title('La solicitud fue rechazada')->body($request->note)->danger()->send();
+                                    }
+                                    \App\Support\SaleCart::recalc($get, $set);
+                                }),
+
+                            Forms\Components\Actions\Action::make('approve_on_spot')
+                                ->label('Aprobar aquí con PIN')
+                                ->icon('heroicon-o-key')
+                                ->color('success')
+                                ->form([
+                                    Forms\Components\Select::make('approver_id')
+                                        ->label('Administrador')
+                                        ->options(fn () => \App\Services\WholesaleApprovalService::approvers()->pluck('name', 'id'))
+                                        ->default(fn () => Auth::user()?->can('authorize_wholesale_price') ? Auth::id() : null)
+                                        ->required(),
+                                    Forms\Components\TextInput::make('pin')
+                                        ->label('PIN del administrador')
+                                        ->password()
+                                        ->required(),
+                                ])
+                                ->action(function (array $data, Get $get, Set $set) {
+                                    try {
+                                        $request = \App\Services\WholesaleApprovalService::approveOnSpot(
+                                            $get('customer_id'), $get('branch_id'), $get('items') ?? [], Auth::user(),
+                                            \App\Models\User::findOrFail($data['approver_id']), $data['pin'],
+                                        );
+                                    } catch (\Illuminate\Validation\ValidationException $e) {
+                                        Notification::make()->title(collect($e->errors())->flatten()->first())->danger()->send();
+                                        return;
+                                    }
+                                    $set('wholesale_request_id', $request->id);
+                                    \App\Support\SaleCart::recalc($get, $set);
+                                    Notification::make()->title('Precio mayorista aprobado')->success()->send();
+                                }),
+                        ]),
                     ]),
 
                 Forms\Components\Section::make('Detalle de Venta Rápida')
                     ->visible(fn(Get $get) => (bool)$get('is_quick_sale'))
                     ->schema([
                         Forms\Components\TextInput::make('quick_sale_description')
-                            ->label('Descripción de la Venta (Ej: 30 Repuestos según lista física #102)')
+                            ->label('Descripción de la venta rápida')
                             ->required(fn(Get $get) => (bool)$get('is_quick_sale'))
                             ->placeholder('Detalle general de los productos vendidos...')
                             ->maxLength(255),
@@ -667,8 +745,30 @@ class SaleResource extends Resource
                     ->schema([
                         Forms\Components\Section::make('Cobro y Vuelto')
                             ->schema([
+                                // Venta a crédito: solo clientes mayoristas con crédito habilitado (decisión 8)
+                                Forms\Components\ToggleButtons::make('payment_condition')
+                                    ->label('Condición de pago')
+                                    ->options(['contado' => 'Contado', 'credito' => 'Crédito'])
+                                    ->icons(['contado' => 'heroicon-o-banknotes', 'credito' => 'heroicon-o-calendar-days'])
+                                    ->default('contado')
+                                    ->inline()
+                                    ->live()
+                                    ->visible(fn (Get $get, string $operation) => $operation === 'create'
+                                        && (bool) \App\Models\Customer::find($get('customer_id'))?->canBuyOnCredit())
+                                    ->helperText(function (Get $get) {
+                                        $c = \App\Models\Customer::find($get('customer_id'));
+                                        if (!$c || $get('payment_condition') !== 'credito') {
+                                            return null;
+                                        }
+                                        $limite = $c->credit_limit !== null ? 'límite S/ ' . number_format((float) $c->credit_limit, 2) : 'sin límite';
+
+                                        return 'Debe S/ ' . number_format($c->outstandingBalance(), 2) . " ({$limite}). Vence en {$c->credit_days} días. "
+                                            . 'Abajo registra solo el adelanto (puede ser 0). Usa factura o nota de venta.';
+                                    })
+                                    ->columnSpan(12),
+
                                 Forms\Components\Repeater::make('payments')
-                                    ->label('Desglose de Pagos')
+                                    ->label(fn (Get $get) => $get('payment_condition') === 'credito' ? 'Adelanto (opcional)' : 'Desglose de Pagos')
                                     ->relationship('payments')
                                     ->schema([
                                         Forms\Components\Select::make('payment_method')
@@ -823,6 +923,16 @@ class SaleResource extends Resource
                     ->dateTime('d/m/Y H:i')
                     ->sortable(),
 
+                Tables\Columns\TextColumn::make('credit_balance')
+                    ->label('Saldo por cobrar')
+                    ->money('PEN')
+                    ->alignment('right')
+                    ->badge()
+                    ->color(fn (Sale $record) => \App\Services\CreditService::isOverdue($record) ? 'danger' : 'warning')
+                    ->description(fn (Sale $record) => $record->due_date ? ('Vence ' . $record->due_date->format('d/m/Y')) : null)
+                    ->visible(fn () => Sale::where('credit_balance', '>', 0)->exists())
+                    ->formatStateUsing(fn ($state) => (float) $state > 0 ? 'S/ ' . number_format((float) $state, 2) : '—'),
+
                 Tables\Columns\TextColumn::make('total')
                     ->label('Total')
                     ->money('PEN')
@@ -888,7 +998,7 @@ class SaleResource extends Resource
                     ->color('info')
                     ->sortable()
                     ->searchable()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Columns\TextColumn::make('warehouse.name')
                     ->label('Almacén')
@@ -905,11 +1015,11 @@ class SaleResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\SelectFilter::make('warehouse_id')
                     ->relationship('warehouse', 'name', function (\Illuminate\Database\Eloquent\Builder $query) {
-                        if (!auth()->user()?->hasRole('super_admin')) {
+                        if (!auth()->user()?->seesAllBranches()) {
                             $query->where('branch_id', auth()->user()?->branch_id ?? 1);
                         }
                         return $query->where('is_active', true);
@@ -1306,6 +1416,76 @@ class SaleResource extends Resource
                         ->visible(fn(Sale $record) => SunatNoteReader::buscarNotaParaVenta($record, 'debito') !== null),
 
                     // 🌟 ACCIÓN DE REGULARIZACIÓN DE NOTA DE CRÉDITO
+                    static::abonoAction(Tables\Actions\Action::make('registrar_abono')),
+
+                    Tables\Actions\Action::make('cambio_devolucion')
+                        ->label('Cambio / devolución')
+                        ->icon('heroicon-o-arrows-right-left')
+                        ->color('warning')
+                        ->visible(fn (Sale $record) => auth()->user()?->can('exchange_sale')
+                            && !in_array($record->sunat_status, ['anulado', 'rechazado'], true)
+                            && blank($record->credit_note_serie)
+                            && !empty(\App\Services\SaleExchangeService::returnable($record)))
+                        ->modalHeading(fn (Sale $record) => "Cambio o devolución · {$record->serie}-{$record->correlative}")
+                        ->modalDescription('Las prendas devueltas vuelven al almacén. Si fue boleta o factura se emite una nota de crédito por esas prendas.')
+                        ->modalWidth('3xl')
+                        ->form(function (Sale $record) {
+                            $available = \App\Services\SaleExchangeService::returnable($record);
+                            $fields = [];
+                            foreach ($record->items()->whereIn('id', array_keys($available))->get() as $item) {
+                                $fields[] = Forms\Components\TextInput::make("qty.{$item->id}")
+                                    ->label($item->product_name . ' · S/ ' . number_format((float) $item->total / max(1, $item->quantity), 2))
+                                    ->helperText("Puede devolver hasta {$available[$item->id]}")
+                                    ->numeric()->minValue(0)->maxValue($available[$item->id])->default(0);
+                            }
+
+                            return [
+                                Forms\Components\Fieldset::make('Prendas que devuelve el cliente')->columns(1)->schema($fields),
+                                Forms\Components\Select::make('reason')->label('Motivo')->options(\App\Models\SaleReturn::REASONS)->required(),
+                                Forms\Components\ToggleButtons::make('type')
+                                    ->label('¿Qué hace el cliente?')
+                                    ->options(['cambio' => 'Cambia por otra prenda', 'devolucion' => 'Devolución de dinero (administrador)'])
+                                    ->default('cambio')
+                                    ->disableOptionWhen(fn (string $value) => $value === 'devolucion' && !auth()->user()?->can('void_sale'))
+                                    ->inline()
+                                    ->required(),
+                            ];
+                        })
+                        ->action(function (Sale $record, array $data, $livewire) {
+                            try {
+                                $return = \App\Services\SaleExchangeService::register($record, $data['qty'] ?? [], $data['type'], $data['reason']);
+                            } catch (\Illuminate\Validation\ValidationException $e) {
+                                Notification::make()->title('No se pudo registrar')->body(collect($e->errors())->flatten()->implode("\n"))->danger()->persistent()->send();
+
+                                return;
+                            }
+
+                            $nc = match ($return->sunat_status) {
+                                'aceptado' => "Nota de crédito {$return->credit_note_number} aceptada por SUNAT.",
+                                'interna' => 'Nota de venta interna: no requiere nota de crédito.',
+                                default => 'La nota de crédito quedó pendiente: reintenta desde "Cambios y devoluciones". ' . ($return->sunat_error ?? ''),
+                            };
+
+                            if ($return->type === 'devolucion') {
+                                try {
+                                    \App\Services\SaleExchangeService::refundCash($return, (float) $return->total);
+                                    $nc .= ' Se registró la salida de S/ ' . number_format((float) $return->total, 2) . ' de la caja.';
+                                } catch (\Illuminate\Validation\ValidationException $e) {
+                                    $nc .= ' ' . collect($e->errors())->flatten()->first();
+                                }
+                                Notification::make()->title('Devolución registrada')->body($nc)
+                                    ->{$return->sunat_status === 'pendiente' ? 'warning' : 'success'}()->persistent()->send();
+
+                                return;
+                            }
+
+                            Notification::make()->title('Prendas recibidas. Ahora registra la prenda nueva.')
+                                ->body('Saldo a favor: S/ ' . number_format((float) $return->total, 2) . '. ' . $nc)
+                                ->{$return->sunat_status === 'pendiente' ? 'warning' : 'success'}()->persistent()->send();
+
+                            $livewire->redirect(SaleResource::getUrl('create', ['cambio' => $return->id]));
+                        }),
+
                     Tables\Actions\Action::make('regularizar_nc')
                         ->label('Regularizar Nota de Crédito')
                         ->icon('heroicon-o-arrow-path-rounded-square')
@@ -1424,7 +1604,7 @@ class SaleResource extends Resource
                         )
                         ->modalSubmitActionLabel('Confirmar y Procesar')
                         ->visible(fn (Sale $record) =>
-                            auth()->user()?->hasRole('super_admin') &&
+                            auth()->user()?->seesAllBranches() &&
                             !str_starts_with($record->serie, 'NV') &&
                             in_array($record->sunat_status, ['rechazado', 'pendiente']) &&
                             (!$record->is_quick_sale || $record->is_audited)
@@ -1450,252 +1630,7 @@ class SaleResource extends Resource
                             }
                         }),
 
-                    Tables\Actions\Action::make('auditar_venta')
-                        ->label('Auditar Venta')
-                        ->icon('heroicon-o-magnifying-glass-circle')
-                        ->color('danger')
-                        ->visible(fn(Sale $record) => $record->is_quick_sale && !$record->is_audited)
-                        ->form(fn (Sale $record): array => [
-                            Forms\Components\Placeholder::make('quick_sale_total_info')
-                                ->label('Total Cobrado Original')
-                                ->content(fn() => 'S/ ' . number_format($record->total, 2)),
-                            
-                            Forms\Components\Repeater::make('audited_items')
-                                ->label('Repuestos Reales Vendidos')
-                                ->required()
-                                ->minItems(1)
-                                ->schema([
-                                    Forms\Components\Grid::make(12)->schema([
-                                        Forms\Components\Select::make('product_variant_id')
-                                            ->label('Repuesto')
-                                            ->searchable()
-                                            ->getSearchResultsUsing(function (string $search) use ($record) {
-                                                $warehouseId = $record->warehouse_id ?? $record->branch?->defaultWarehouse?->id ?? 1;
-                                                $branchId = $record->branch_id ?? 1;
-                                                return \App\Models\ProductVariant::with('product')
-                                                    ->whereHas('product', fn($q) => $q->where('name', 'like', "%{$search}%")->whereHas('branches', fn($b) => $b->where('branches.id', $branchId)))
-                                                    ->whereHas('inventories', fn($q) => $q->where('warehouse_id', $warehouseId)->where('stock', '>', 0))
-                                                    ->limit(10)
-                                                    ->get()
-                                                    ->mapWithKeys(fn($v) => [$v->id => $v->product->name . ' - ' . ($v->sku ?? $v->id)]);
-                                            })
-                                            ->getOptionLabelUsing(function ($value) {
-                                                $v = \App\Models\ProductVariant::with('product')->find($value);
-                                                return $v ? ($v->product?->name . ' - ' . ($v->sku ?? $v->id)) : null;
-                                            })
-                                            ->required()
-                                            ->live()
-                                            ->columnSpan(6),
-
-                                        Forms\Components\TextInput::make('quantity')
-                                            ->label('Cantidad')
-                                            ->numeric()
-                                            ->default(1)
-                                            ->minValue(1)
-                                            ->required()
-                                            ->live(debounce: 500)
-                                            ->columnSpan(3),
-
-                                        Forms\Components\TextInput::make('price')
-                                            ->label('Precio Unit. (S/)')
-                                            ->numeric()
-                                            ->prefix('S/')
-                                            ->required()
-                                            ->live(debounce: 500)
-                                            ->columnSpan(3),
-                                    ])
-                                ])
-                                ->live()
-                                ->createItemButtonLabel('➕ Agregar Repuesto Real')
-                        ])
-                        ->action(function (Sale $record, array $data) {
-                            if (!$record->is_quick_sale || $record->is_audited) {
-                                Notification::make()
-                                    ->title('Venta ya auditada')
-                                    ->body('Esta venta rápida ya fue auditada anteriormente. No se puede volver a auditar ni descontar el stock dos veces.')
-                                    ->danger()
-                                    ->persistent()
-                                    ->send();
-                                return;
-                            }
-
-                            $items = $data['audited_items'] ?? [];
-                            $esElectronico = !str_starts_with(trim((string)$record->serie), 'NV');
-
-                            if ($esElectronico) {
-                                foreach ($items as $item) {
-                                    $precio = (float)($item['price'] ?? 0);
-                                    $cant = (float)($item['quantity'] ?? 1);
-                                    if ($precio <= 0 || ($precio * $cant) <= 0) {
-                                        Notification::make()
-                                            ->title('Línea con precio 0 no permitida')
-                                            ->body('Las boletas y facturas no admiten líneas con precio 0. Escribe la placa u observación en la descripción del producto.')
-                                            ->danger()
-                                            ->persistent()
-                                            ->send();
-                                        return;
-                                    }
-                                }
-                            }
-                            
-                            $totalRealSum = 0;
-                            foreach ($items as $item) {
-                                $totalRealSum += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 1);
-                            }
-                            $totalRealSum = round($totalRealSum, 2);
-                            $totalCobrado = round((float)($record->quick_sale_total ?: $record->total), 2);
-
-                            if (abs($totalRealSum - $totalCobrado) > 0.01) {
-                                $diferencia = round($totalRealSum - $totalCobrado, 2);
-                                $sentido = $diferencia > 0 ? 'de más' : 'de menos';
-                                Notification::make()
-                                    ->title('El total auditado no coincide con el total cobrado')
-                                    ->body('La suma de las líneas auditadas (S/ ' . number_format($totalRealSum, 2) . ') debe ser igual al total cobrado en la venta rápida (S/ ' . number_format($totalCobrado, 2) . '). Diferencia: S/ ' . number_format(abs($diferencia), 2) . " {$sentido}.")
-                                    ->danger()
-                                    ->persistent()
-                                    ->send();
-                                return;
-                            }
-
-                            DB::beginTransaction();
-                            try {
-                                $lockedRecord = Sale::where('id', $record->id)->lockForUpdate()->first();
-                                if (!$lockedRecord || $lockedRecord->is_audited) {
-                                    DB::rollBack();
-                                    Notification::make()
-                                        ->title('Venta ya auditada')
-                                        ->body('Esta venta rápida ya fue auditada anteriormente. No se puede descontar el stock dos veces.')
-                                        ->danger()
-                                        ->persistent()
-                                        ->send();
-                                    return;
-                                }
-
-                                $warehouseId = $record->warehouse_id ?? $record->branch?->defaultWarehouse?->id ?? 1;
-
-                                // Salvaguarda: si existieran líneas previas con stock antes de borrar, devolver su stock primero
-                                foreach ($record->items()->with('productVariant.product')->get() as $prevItem) {
-                                    $prevVariant = $prevItem->productVariant;
-                                    $prevIsService = ($prevVariant?->product?->is_service) || ($prevVariant?->sku === 'REPE-GENERICO');
-                                    if ($prevVariant && !$prevIsService) {
-                                        $prevInv = \App\Models\Inventory::where('product_variant_id', $prevItem->product_variant_id)
-                                            ->where('warehouse_id', $warehouseId)
-                                            ->lockForUpdate()
-                                            ->first();
-                                        if ($prevInv) {
-                                            $prevInv->increment('stock', (int)$prevItem->quantity);
-                                        }
-                                    }
-                                }
-
-                                $record->items()->delete();
-                                $hasSubtotalColumn = \Illuminate\Support\Facades\Schema::hasColumn('sale_items', 'subtotal');
-
-                                foreach ($items as $item) {
-                                    $variant = \App\Models\ProductVariant::with('product')->find($item['product_variant_id']);
-                                    $productName = !empty($item['product_name'])
-                                        ? $item['product_name']
-                                        : (($variant && $variant->product) ? $variant->product->name : 'Repuesto');
-                                    $qty = (int)($item['quantity'] ?? 1);
-                                    $price = (float)($item['price'] ?? 0);
-                                    $lineTotal = round($price * $qty, 2);
-
-                                    $itemPayload = [
-                                        'sale_id'            => $record->id,
-                                        'product_variant_id' => $item['product_variant_id'],
-                                        'product_name'       => $productName,
-                                        'quantity'           => $qty,
-                                        'price'              => $price,
-                                        'igv'                => round($lineTotal - ($lineTotal / 1.18), 2),
-                                        'total'              => $lineTotal,
-                                    ];
-                                    if ($hasSubtotalColumn) {
-                                        $itemPayload['subtotal'] = round($lineTotal / 1.18, 2);
-                                    }
-
-                                    \App\Models\SaleItem::create($itemPayload);
-
-                                    $isService = ($variant?->product?->is_service) || ($variant?->sku === 'REPE-GENERICO');
-                                    if (!$isService) {
-                                        $inventario = \App\Models\Inventory::where('product_variant_id', $item['product_variant_id'])
-                                            ->where('warehouse_id', $warehouseId)
-                                            ->lockForUpdate()
-                                            ->first();
-                                        if (!$inventario) {
-                                            $inventario = \App\Models\Inventory::firstOrCreate(
-                                                [
-                                                    'product_variant_id' => $item['product_variant_id'],
-                                                    'warehouse_id' => $warehouseId,
-                                                ],
-                                                [
-                                                    'branch_id' => $record->branch_id,
-                                                    'stock' => 0,
-                                                ]
-                                            );
-                                            $inventario = \App\Models\Inventory::where('id', $inventario->id)->lockForUpdate()->first();
-                                        }
-                                        if ($inventario) {
-                                            $inventario->decrement('stock', $qty);
-                                        }
-                                    }
-                                }
-
-                                $subtotal = round($totalRealSum / 1.18, 2);
-                                $igv = round($totalRealSum - $subtotal, 2);
-
-                                $record->update([
-                                    'warehouse_id' => $warehouseId,
-                                    'total'        => $totalRealSum,
-                                    'subtotal'     => $subtotal,
-                                    'igv'          => $igv,
-                                    'is_audited'   => true,
-                                ]);
-
-                                DB::commit();
-
-                                $record->unsetRelation('items');
-                                $record->load(['branch', 'items', 'customer']);
-
-                                Notification::make()
-                                    ->title('Venta Auditada Exitosamente')
-                                    ->body('El inventario ha sido descontado y los items actualizados.')
-                                    ->success()
-                                    ->send();
-
-                                if (!str_starts_with($record->serie, 'NV')) {
-                                    try {
-                                        $service = new \App\Services\SunatService();
-                                        $res = $service->enviarBoleta($record);
-                                        if (isset($res['success']) && $res['success'] === true) {
-                                            $record->update([
-                                                'sunat_status'     => 'aceptado',
-                                                'sunat_error'      => null,
-                                                'sunat_error_code' => null,
-                                            ]);
-                                            Notification::make()->title('¡Venta Aceptada por SUNAT!')->success()->send();
-                                        } else {
-                                            $isRejected = !empty($res['rejected_by_sunat']);
-                                            $record->update([
-                                                'sunat_status'     => $isRejected ? 'rechazado' : 'pendiente',
-                                                'sunat_error'      => $res['error'] ?? null,
-                                                'sunat_error_code' => $res['code'] ?? null,
-                                            ]);
-                                            Notification::make()->title('Venta auditada. Falló envío a SUNAT')->body($res['error'] ?? 'Pendiente de envío manual.')->warning()->send();
-                                        }
-                                    } catch (\Exception $e) {
-                                        Notification::make()->title('Venta auditada. Sin conexión a SUNAT')->warning()->send();
-                                    }
-                                }
-
-                            } catch (\Exception $e) {
-                                DB::rollBack();
-                                Notification::make()
-                                    ->title('Error al procesar la auditoría')
-                                    ->body($e->getMessage())
-                                    ->danger()
-                                    ->send();
-                            }
-                        }),
+                    // 'Auditar venta rápida' se retiró junto con la venta rápida (decisión 3).
                 ])
                 ->icon('heroicon-m-ellipsis-vertical')
                 ->color('gray')
@@ -1710,7 +1645,7 @@ class SaleResource extends Resource
                         ->modalHeading('Reemisión y Reintento Masivo a SUNAT')
                         ->modalDescription('Se procesarán los comprobantes seleccionados que estén pendientes o rechazados. Los pendientes se reintentarán primero; si SUNAT los rechaza, se reemitirán con número nuevo. Los rechazados se reemitirán directamente con número nuevo y fecha de hoy. Stock y caja no se modificarán.')
                         ->modalSubmitActionLabel('Iniciar Procesamiento Masivo')
-                        ->visible(fn () => auth()->user()?->hasRole('super_admin'))
+                        ->visible(fn () => auth()->user()?->seesAllBranches())
                         ->action(function (\Illuminate\Database\Eloquent\Collection $records) {
                             $filtrados = $records->filter(fn (Sale $r) =>
                                 !str_starts_with($r->serie, 'NV') &&
@@ -1748,12 +1683,45 @@ class SaleResource extends Resource
             ]);
     }
 
+    /** Abono a una venta a crédito (se usa en Ventas y en Cuentas por cobrar). */
+    public static function abonoAction($action)
+    {
+        return $action
+            ->label('Registrar abono')
+            ->icon('heroicon-o-banknotes')
+            ->color('success')
+            ->visible(fn (Sale $record) => (float) $record->credit_balance > 0 && (auth()->user()?->can('create_customer::payment') || auth()->user()?->can('manage_credit')))
+            ->modalHeading(fn (Sale $record) => "Abono a {$record->serie}-{$record->correlative}")
+            ->modalDescription(fn (Sale $record) => 'Saldo pendiente: S/ ' . number_format((float) $record->credit_balance, 2)
+                . ($record->due_date ? ' · vence ' . $record->due_date->format('d/m/Y') : ''))
+            ->form(fn (Sale $record) => [
+                Forms\Components\TextInput::make('amount')->label('Monto')->numeric()->prefix('S/')
+                    ->minValue(0.01)->maxValue((float) $record->credit_balance)->default((float) $record->credit_balance)->required(),
+                Forms\Components\Select::make('payment_method')->label('Medio de pago')
+                    ->options(\App\Services\CreditService::METHODS)->default('efectivo')->required(),
+                Forms\Components\TextInput::make('reference')->label('N.º de operación (opcional)')->maxLength(60),
+            ])
+            ->action(function (Sale $record, array $data) {
+                try {
+                    \App\Services\CreditService::registerPayment($record, $data['payment_method'], (float) $data['amount'], $data['reference'] ?? null);
+                } catch (\Illuminate\Validation\ValidationException $e) {
+                    Notification::make()->title(collect($e->errors())->flatten()->first())->danger()->send();
+
+                    return;
+                }
+                $saldo = (float) $record->fresh()->credit_balance;
+                Notification::make()->title('Abono registrado')
+                    ->body($saldo > 0 ? 'Saldo pendiente: S/ ' . number_format($saldo, 2) : 'La venta quedó pagada.')
+                    ->success()->send();
+            });
+    }
+
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
         $user = Auth::user();
 
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $query->where('branch_id', $user->branch_id ?? 1);
         }
 

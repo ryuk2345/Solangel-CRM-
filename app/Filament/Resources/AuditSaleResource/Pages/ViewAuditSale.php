@@ -236,7 +236,7 @@ class ViewAuditSale extends ViewRecord
                 )
                 ->modalSubmitActionLabel('Confirmar y Procesar')
                 ->visible(fn ($record) =>
-                    auth()->user()?->hasRole('super_admin') &&
+                    auth()->user()?->seesAllBranches() &&
                     !str_starts_with($record->serie, 'NV') &&
                     in_array($record->sunat_status, ['rechazado', 'pendiente']) &&
                     (!$record->is_quick_sale || $record->is_audited)

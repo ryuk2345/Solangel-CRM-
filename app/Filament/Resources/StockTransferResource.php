@@ -28,8 +28,8 @@ class StockTransferResource extends Resource
     protected static ?string $model = StockTransfer::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-arrows-right-left';
-    protected static ?string $navigationGroup = '2. Catálogo e Inventario';
-    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = 'Catálogo e inventario';
+    protected static ?int $navigationSort = 4;
     protected static ?string $modelLabel = 'Traspaso de Stock';
     protected static ?string $pluralModelLabel = 'Traspasos de Stock';
 
@@ -48,7 +48,7 @@ class StockTransferResource extends Resource
             ]);
 
         $user = auth()->user();
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $userBranchId = $user->branch_id ?? 1;
             $query->where(function (Builder $q) use ($userBranchId) {
                 $q->where('origin_branch_id', $userBranchId)
@@ -61,7 +61,7 @@ class StockTransferResource extends Resource
 
     public static function form(Form $form): Form
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
         $userBranchId = auth()->user()?->branch_id ?? 1;
 
         return $form
@@ -194,7 +194,7 @@ class StockTransferResource extends Resource
                                 Forms\Components\Grid::make(12)
                                     ->schema([
                                         Forms\Components\Select::make('product_variant_id')
-                                            ->label('Producto / Repuesto')
+                                            ->label('Prenda (modelo / color / talla)')
                                             ->required()
                                             ->searchable()
                                             ->getSearchResultsUsing(function (string $search, Get $get) {
@@ -270,7 +270,7 @@ class StockTransferResource extends Resource
 
     public static function table(Table $table): Table
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $table
             ->columns([
@@ -475,18 +475,8 @@ class StockTransferResource extends Resource
                                 ]);
 
                                 if ($receivedQty > 0) {
-                                    $destInv = Inventory::firstOrCreate(
-                                        [
-                                            'product_variant_id' => $item->product_variant_id,
-                                            'warehouse_id' => $locked->destination_warehouse_id,
-                                        ],
-                                        [
-                                            'branch_id' => $locked->destination_branch_id,
-                                            'stock' => 0,
-                                        ]
-                                    );
-                                    $destInv = Inventory::where('id', $destInv->id)->lockForUpdate()->first();
-                                    $destInv->increment('stock', $receivedQty);
+                                    $guideDoc = $locked->despatch?->document_number ?? $locked->number;
+                                    \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->destination_warehouse_id, (int) $receivedQty, 'transfer_in', $locked, "Recepción traspaso {$locked->number}", null, null, $guideDoc);
                                 }
                             }
 
@@ -536,15 +526,9 @@ class StockTransferResource extends Resource
                                 return;
                             }
 
+                            $guideDoc = $locked->despatch?->document_number ?? $locked->number;
                             foreach ($locked->items as $item) {
-                                $origInv = Inventory::where('product_variant_id', $item->product_variant_id)
-                                    ->where('warehouse_id', $locked->origin_warehouse_id)
-                                    ->lockForUpdate()
-                                    ->first();
-
-                                if ($origInv) {
-                                    $origInv->increment('stock', $item->quantity_sent);
-                                }
+                                \App\Services\StockService::move((int) $item->product_variant_id, (int) $locked->origin_warehouse_id, (int) $item->quantity_sent, 'transfer_return', $locked, "Traspaso anulado {$locked->number}", null, null, $guideDoc);
                             }
 
                             $locked->update([

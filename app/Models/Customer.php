@@ -13,11 +13,42 @@ class Customer extends Model
     protected $fillable = [
         'document_type',
         'document_number',
+        'customer_type',
+        'credit_enabled',
+        'credit_limit',
+        'credit_days',
         'name',
         'address',
         'email',
         'phone',
     ];
+
+    protected $casts = [
+        'credit_enabled' => 'boolean',
+        'credit_limit' => 'decimal:2',
+    ];
+
+    public function sales()
+    {
+        return $this->hasMany(Sale::class);
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(CustomerPayment::class);
+    }
+
+    /** Deuda pendiente: suma de saldos de sus ventas a crédito vigentes. */
+    public function outstandingBalance(): float
+    {
+        return (float) $this->sales()->where('credit_balance', '>', 0)
+            ->whereNotIn('sunat_status', ['anulado', 'rechazado'])->sum('credit_balance');
+    }
+
+    public function canBuyOnCredit(): bool
+    {
+        return $this->credit_enabled && $this->customer_type === 'mayorista';
+    }
 
     public function getOptionLabel(): string
     {

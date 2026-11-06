@@ -20,7 +20,7 @@ class ViewSale extends ViewRecord
         parent::mount($record);
 
         $user = auth()->user();
-        if ($user && !$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$this->record->branch_id) {
+        if ($user && !$user->seesAllBranches() && (int)$user->branch_id !== (int)$this->record->branch_id) {
             abort(403, 'No tiene permiso para ver comprobantes de otra sucursal.');
         }
     }
@@ -122,7 +122,7 @@ class ViewSale extends ViewRecord
                 )
                 ->modalSubmitActionLabel('Confirmar y Procesar')
                 ->visible(fn ($record) =>
-                    auth()->user()?->hasRole('super_admin') &&
+                    auth()->user()?->seesAllBranches() &&
                     !str_starts_with($record->serie, 'NV') &&
                     in_array($record->sunat_status, ['rechazado', 'pendiente']) &&
                     (!$record->is_quick_sale || $record->is_audited)

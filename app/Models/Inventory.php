@@ -40,4 +40,32 @@ class Inventory extends Model
     {
         return $this->belongsTo(Warehouse::class);
     }
+
+    /**
+     * Stock bajo por talla y color en cada almacén (decisión 10): stock <= umbral del modelo
+     * o, si el modelo no tiene uno propio, el general de la empresa (20 por defecto).
+     */
+    public function scopeLowStock($query)
+    {
+        $global = CompanySetting::lowStockThreshold();
+
+        // Sin joins: Filament aplica los filtros dentro de un where agrupado, donde un join se perdería
+        return $query
+            ->whereHas('productVariant.product', fn ($p) => $p->where('is_service', false))
+            ->whereRaw(
+                'inventories.stock <= COALESCE((SELECT p.low_stock_threshold FROM product_variants v '
+                . 'INNER JOIN products p ON p.id = v.product_id WHERE v.id = inventories.product_variant_id), ?)',
+                [$global],
+            );
+    }
+
+    public function getLowStockThresholdAttribute(): int
+    {
+        return $this->productVariant?->product?->lowStockThreshold() ?? CompanySetting::lowStockThreshold();
+    }
+
+    public function getIsLowStockAttribute(): bool
+    {
+        return (int) $this->stock <= $this->low_stock_threshold;
+    }
 }

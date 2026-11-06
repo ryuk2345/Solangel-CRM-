@@ -4,106 +4,92 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
+/**
+ * Modelo de prenda (por ejemplo "Polo básico pima"). Cada combinación de color y talla
+ * es una ProductVariant con su propio SKU, código de barras y stock.
+ */
 class Product extends Model
 {
     use HasFactory;
 
-    // Permitir que Filament guarde datos en todas estas columnas
     protected $guarded = [];
 
-    // 🌟 AGREGA ESTO PARA QUE LARAVEL ENTIENDA EL SWITCH BOOLEANO
     protected $casts = [
         'is_service' => 'boolean',
         'is_web_visible' => 'boolean',
+        'allows_delivery' => 'boolean',
+        'sale_price' => 'decimal:2',
+        'wholesale_price' => 'decimal:2',
+        'purchase_price' => 'decimal:2',
     ];
 
     protected static function booted()
     {
-        static::saved(function ($product) {
-            // Asegurar que exista al menos una variante para este producto
-            $sku = !empty($product->oem_code) ? trim($product->oem_code) : 'PROD-' . str_pad($product->id, 5, '0', STR_PAD_LEFT);
-            
-            // Si ya existen variantes para este producto, no pisamos ninguna
-            $hasVariants = \App\Models\ProductVariant::where('product_id', $product->id)->exists();
-            if ($hasVariants) {
-                // Solo actualizamos la variante que coincida con el SKU actual del producto
-                $defaultVariant = \App\Models\ProductVariant::where('product_id', $product->id)
-                    ->where('sku', $sku)
-                    ->first();
-                if ($defaultVariant) {
-                    $defaultVariant->update([
-                        'sale_price' => $product->sale_price,
-                        'purchase_price' => $product->purchase_price,
-                        'color_name' => !empty($product->brand) ? $product->brand : $defaultVariant->color_name,
-                    ]);
-                }
-                return;
+        // Código del modelo (base del SKU). Si no se escribe, se genera: M00012
+        static::saving(function (Product $product) {
+            if (filled($product->code)) {
+                $product->code = strtoupper(preg_replace('/\s+/', '-', trim($product->code)));
             }
-
-            // Si no tiene variantes, creamos la variante principal
-            $existingVariant = \App\Models\ProductVariant::where('sku', $sku)->first();
-            if ($existingVariant) {
-                $sku .= '-' . $product->id;
-            }
-
-            \App\Models\ProductVariant::create([
-                'product_id' => $product->id,
-                'sku' => $sku,
-                'size' => 'Único',
-                'color_name' => !empty($product->brand) ? $product->brand : 'Único',
-                'sale_price' => $product->sale_price,
-                'purchase_price' => $product->purchase_price,
-            ]);
         });
+
+        static::created(function (Product $product) {
+            if (blank($product->code) && !$product->is_service) {
+                $product->forceFill(['code' => 'M' . str_pad((string) $product->id, 5, '0', STR_PAD_LEFT)])->saveQuietly();
+            }
+        });
+
         static::deleting(function ($product) {
             $user = auth()->user();
             $variantIds = $product->variants()->pluck('id');
 
-            // Regla: Si el producto es compartido (más de una tienda), solo super_admin puede eliminarlo
-            $branchesCount = $product->branches()->count();
-            if ($branchesCount > 1 && $user && !$user->hasRole('super_admin')) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'id' => "El producto '{$product->name}' está compartido entre varias tiendas. Solo un super_admin puede eliminarlo.",
+            if ($product->branches()->count() > 1 && $user && !$user->seesAllBranches()) {
+                throw ValidationException::withMessages([
+                    'id' => "El producto '{$product->name}' está compartido entre varias tiendas. Solo el administrador puede eliminarlo.",
                 ]);
             }
 
-            // Regla: No permitir eliminar productos con stock físico > 0
-            $totalStock = \App\Models\Inventory::whereIn('product_variant_id', $variantIds)->sum('stock');
+            $totalStock = Inventory::whereIn('product_variant_id', $variantIds)->sum('stock');
             if ($totalStock > 0) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'id' => "No se puede eliminar el producto '{$product->name}' porque tiene stock físico disponible ({$totalStock} unidades en sus almacenes). Ajusta el stock a 0 antes de eliminarlo.",
+                throw ValidationException::withMessages([
+                    'id' => "No se puede eliminar '{$product->name}': tiene {$totalStock} unidades en stock. Ajusta el stock a 0 antes de eliminarlo.",
                 ]);
             }
 
-            // Regla: No permitir eliminar productos con ventas
-            $salesCount = \App\Models\SaleItem::whereIn('product_variant_id', $variantIds)->count();
+            $salesCount = SaleItem::whereIn('product_variant_id', $variantIds)->count();
             if ($salesCount > 0) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'id' => "No se puede eliminar el producto '{$product->name}' porque tiene historial de ventas ({$salesCount} ventas registradas). Desactívalo o quita su visibilidad en su lugar.",
+                throw ValidationException::withMessages([
+                    'id' => "No se puede eliminar '{$product->name}': tiene ventas registradas. Desactiva sus variantes en su lugar.",
                 ]);
             }
 
-            // Regla: No permitir eliminar productos con traspasos
-            $transfersCount = \App\Models\StockTransferItem::whereIn('product_variant_id', $variantIds)->count();
-            if ($transfersCount > 0) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'id' => "No se puede eliminar el producto '{$product->name}' porque tiene historial de traspasos ({$transfersCount} traspasos registrados).",
+            if (StockTransferItem::whereIn('product_variant_id', $variantIds)->exists()) {
+                throw ValidationException::withMessages([
+                    'id' => "No se puede eliminar '{$product->name}': tiene traspasos registrados.",
                 ]);
             }
         });
     }
 
-    // Relación: Sucursales / Tiendas donde el producto está habilitado en su catálogo
     public function branches()
     {
         return $this->belongsToMany(Branch::class, 'branch_product')->withTimestamps();
     }
 
-    // Relación: Un producto pertenece a una categoría
     public function category()
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function brand()
+    {
+        return $this->belongsTo(Brand::class);
+    }
+
+    public function season()
+    {
+        return $this->belongsTo(Season::class);
     }
 
     public function images()
@@ -114,5 +100,11 @@ class Product extends Model
     public function variants()
     {
         return $this->hasMany(ProductVariant::class);
+    }
+
+    /** Umbral de stock bajo de este modelo, o el general de la empresa (20 por defecto). */
+    public function lowStockThreshold(): int
+    {
+        return (int) ($this->low_stock_threshold ?? CompanySetting::current()?->low_stock_threshold ?? 20);
     }
 }

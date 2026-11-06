@@ -13,12 +13,12 @@ class ListProducts extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            Actions\Action::make('importar_csv')
-                ->label('Importar desde CSV/Excel')
-                ->color('success')
-                ->icon('heroicon-o-arrow-up-tray')
-                ->url(fn () => route('import.products.page')),
-
+            Actions\Action::make('print_labels')
+                ->label('Imprimir etiquetas')
+                ->icon('heroicon-o-qr-code')
+                ->color('gray')
+                ->url(fn () => \App\Filament\Pages\PrintLabels::getUrl())
+                ->visible(fn () => auth()->user()?->can('print_labels') ?? false),
             Actions\CreateAction::make(),
         ];
     }

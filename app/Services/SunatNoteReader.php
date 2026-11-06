@@ -96,11 +96,8 @@ class SunatNoteReader
             ];
         }
 
-        // 2. Regla Antigua (< 5 de octubre): Serie prefijo con id de la venta
-        $candidatos[] = [
-            'serie' => $prefijoNotaDefault,
-            'correlative' => str_pad($sale->id, 8, '0', STR_PAD_LEFT),
-        ];
+        // (La regla antigua de Mangui —nota numerada con el id de la venta— no aplica en este proyecto:
+        //  con notas de crédito parciales podría confundir una devolución con una anulación.)
 
         foreach ($candidatos as $cand) {
             $serieNota = $cand['serie'];

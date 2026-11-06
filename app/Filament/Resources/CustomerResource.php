@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\CustomerResource\Pages;
+use App\Filament\Resources\CustomerResource\RelationManagers;
 use App\Models\Customer;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -20,7 +21,8 @@ class CustomerResource extends Resource
     protected static ?string $modelLabel = 'Cliente';
     protected static ?string $pluralModelLabel = 'Clientes';
     protected static ?string $navigationIcon = 'heroicon-o-user-group';
-    protected static ?string $navigationGroup = '1. Ventas y Cajas'; // Respetando tu grupo organizado
+    protected static ?string $navigationGroup = 'Ventas y cajas';
+    protected static ?int $navigationSort = 4;
 
     public static function form(Form $form): Form
     {
@@ -98,6 +100,32 @@ class CustomerResource extends Resource
                     ->required()
                     ->maxLength(255),
 
+                Forms\Components\ToggleButtons::make('customer_type')
+                    ->label('Tipo de cliente')
+                    ->options(['minorista' => 'Minorista', 'mayorista' => 'Mayorista'])
+                    ->icons(['minorista' => 'heroicon-o-user', 'mayorista' => 'heroicon-o-building-storefront'])
+                    ->colors(['minorista' => 'gray', 'mayorista' => 'warning'])
+                    ->default('minorista')
+                    ->inline()
+                    ->required()
+                    ->live()
+                    ->helperText('Desde ' . \App\Models\CompanySetting::wholesaleMinQty() . ' prendas todos pagan precio mayorista. Un cliente mayorista puede llevar 1 prenda a precio mayorista solo con aprobación de un administrador.'),
+
+                Forms\Components\Fieldset::make('Crédito (solo mayoristas)')
+                    ->visible(fn (Forms\Get $get) => $get('customer_type') === 'mayorista')
+                    ->disabled(fn () => !auth()->user()?->can('manage_credit'))
+                    ->columns(3)
+                    ->schema([
+                        Forms\Components\Toggle::make('credit_enabled')->label('Puede comprar a crédito')->live()->inline(false),
+                        Forms\Components\TextInput::make('credit_limit')->label('Límite de crédito')->numeric()->minValue(0)->prefix('S/')
+                            ->helperText('Vacío = sin límite')->visible(fn (Forms\Get $get) => (bool) $get('credit_enabled')),
+                        Forms\Components\TextInput::make('credit_days')->label('Días para pagar')->numeric()->minValue(1)->default(30)
+                            ->visible(fn (Forms\Get $get) => (bool) $get('credit_enabled')),
+                        Forms\Components\Placeholder::make('deuda')->label('Deuda actual')
+                            ->content(fn (?\App\Models\Customer $record) => 'S/ ' . number_format($record?->outstandingBalance() ?? 0, 2))
+                            ->visible(fn (?\App\Models\Customer $record) => $record !== null),
+                    ]),
+
                 Forms\Components\TextInput::make('address')
                     ->label('Dirección Física')
                     ->maxLength(255)
@@ -134,6 +162,18 @@ class CustomerResource extends Resource
                     })
                     ->wrap(), // 🌟 LA MAGIA: Rompe el texto largo en varias líneas
                     
+                Tables\Columns\TextColumn::make('customer_type')
+                    ->label('Tipo')
+                    ->badge()
+                    ->formatStateUsing(fn ($state) => ucfirst($state))
+                    ->color(fn ($state) => $state === 'mayorista' ? 'warning' : 'gray'),
+
+                Tables\Columns\TextColumn::make('deuda')
+                    ->label('Deuda')
+                    ->state(fn (\App\Models\Customer $record) => $record->outstandingBalance())
+                    ->money('PEN')
+                    ->color(fn ($state) => $state > 0 ? 'danger' : 'gray'),
+
                 Tables\Columns\TextColumn::make('email')
                     ->label('Correo')
                     ->searchable()
@@ -143,7 +183,9 @@ class CustomerResource extends Resource
                     ->label('Teléfono'),
             ])
             ->filters([
-                //
+                Tables\Filters\SelectFilter::make('customer_type')
+                    ->label('Tipo')
+                    ->options(['minorista' => 'Minorista', 'mayorista' => 'Mayorista']),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
@@ -158,7 +200,8 @@ class CustomerResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            RelationManagers\SalesRelationManager::class,
+            RelationManagers\PaymentsRelationManager::class,
         ];
     }
 

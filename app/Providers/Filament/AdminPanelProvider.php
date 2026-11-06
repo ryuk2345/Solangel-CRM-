@@ -19,6 +19,7 @@ use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Illuminate\Support\HtmlString;
+use Filament\Navigation\NavigationGroup;
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -42,6 +43,10 @@ class AdminPanelProvider extends PanelProvider
             // 🌟 ACTIVAR EL BOTÓN DE MODO OSCURO (Aparecerá arriba a la derecha)
             ->darkMode(true)
 
+            // Avisos dentro del sistema (por ejemplo: aprobaciones de precio mayorista pendientes)
+            ->databaseNotifications()
+            ->databaseNotificationsPolling('20s')
+
             ->colors([
                 'primary' => '#e11d48', // Tu Rojo/Rosa vibrante
                 'danger' => '#b91c1c',
@@ -51,10 +56,10 @@ class AdminPanelProvider extends PanelProvider
                 'warning' => Color::Orange,
             ])
             ->navigationGroups([
-                '1. Ventas y Cajas',
-                '2. Catálogo e Inventario',
-                '3. Administración',
-                '4. Configuración',
+                NavigationGroup::make('Ventas y cajas'),
+                NavigationGroup::make('Catálogo e inventario'),
+                NavigationGroup::make('Administración'),
+                NavigationGroup::make('Configuración')->collapsed(),
             ])
 
             // 🌟 CSS INTELIGENTE Y PRESTIGIOSO PARA EL PANEL 🌟
@@ -146,6 +151,7 @@ class AdminPanelProvider extends PanelProvider
                 ')
             )
 
+            ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\\Filament\\Clusters')
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
@@ -153,8 +159,6 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
             ->widgets([
-                Widgets\AccountWidget::class,
-                \App\Filament\Widgets\StatsOverview::class,
             ])
             ->middleware([
                 EncryptCookies::class,

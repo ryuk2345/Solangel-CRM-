@@ -21,7 +21,7 @@ class ViewStockTransfer extends ViewRecord
                 ->label('Recibir Traspaso')
                 ->icon('heroicon-o-inbox-arrow-down')
                 ->color('success')
-                ->visible(fn ($record) => $record->status === 'en_transito' && (auth()->user()?->hasRole('super_admin') || (int)auth()->user()?->branch_id === (int)$record->destination_branch_id))
+                ->visible(fn ($record) => $record->status === 'en_transito' && (auth()->user()?->seesAllBranches() || (int)auth()->user()?->branch_id === (int)$record->destination_branch_id))
                 ->form(function ($record) {
                     $fields = [];
                     foreach ($record->items as $item) {
@@ -89,18 +89,8 @@ class ViewStockTransfer extends ViewRecord
                             ]);
 
                             if ($receivedQty > 0) {
-                                $destInv = Inventory::firstOrCreate(
-                                    [
-                                        'product_variant_id' => $item->product_variant_id,
-                                        'warehouse_id' => $lockedTransfer->destination_warehouse_id,
-                                    ],
-                                    [
-                                        'branch_id' => $lockedTransfer->destination_branch_id,
-                                        'stock' => 0,
-                                    ]
-                                );
-                                $destInv = Inventory::where('id', $destInv->id)->lockForUpdate()->first();
-                                $destInv->increment('stock', $receivedQty);
+                                $guideDoc = $lockedTransfer->despatch?->document_number ?? $lockedTransfer->number;
+                                \App\Services\StockService::move((int) $item->product_variant_id, (int) $lockedTransfer->destination_warehouse_id, (int) $receivedQty, 'transfer_in', $lockedTransfer, "Recepción traspaso {$lockedTransfer->number}", null, null, $guideDoc);
                             }
                         }
 
@@ -136,7 +126,7 @@ class ViewStockTransfer extends ViewRecord
                     }
                     return $desc;
                 })
-                ->visible(fn ($record) => auth()->user()?->hasRole('super_admin') && $record->status === 'en_transito')
+                ->visible(fn ($record) => auth()->user()?->seesAllBranches() && $record->status === 'en_transito')
                 ->form([
                     Forms\Components\Textarea::make('cancellation_reason')
                         ->label('Motivo de la Anulación')
@@ -157,15 +147,9 @@ class ViewStockTransfer extends ViewRecord
                         }
 
                         // Devolver stock al almacén de origen
+                        $guideDoc = $lockedTransfer->despatch?->document_number ?? $lockedTransfer->number;
                         foreach ($lockedTransfer->items as $item) {
-                            $origInv = Inventory::where('product_variant_id', $item->product_variant_id)
-                                ->where('warehouse_id', $lockedTransfer->origin_warehouse_id)
-                                ->lockForUpdate()
-                                ->first();
-
-                            if ($origInv) {
-                                $origInv->increment('stock', $item->quantity_sent);
-                            }
+                            \App\Services\StockService::move((int) $item->product_variant_id, (int) $lockedTransfer->origin_warehouse_id, (int) $item->quantity_sent, 'transfer_return', $lockedTransfer, "Traspaso anulado {$lockedTransfer->number}", null, null, $guideDoc);
                         }
 
                         $lockedTransfer->update([

@@ -17,14 +17,21 @@ class CreateSale extends CreateRecord
     protected static string $resource = SaleResource::class;
     protected ?int $cajaValidaId = null;
 
+    /**
+     * Toda la creación (correlativo, venta, detalle, stock, pagos y caja) va en una transacción:
+     * si falta stock al descontar, no queda nada a medias. SUNAT se envía después del commit.
+     */
+    protected ?bool $hasDatabaseTransactions = true;
+
     // 🌟 1. EL BLOQUEO INICIAL: Se ejecuta antes de cargar la pantalla
     public function mount(): void
     {
         parent::mount();
+        $this->precargarCambio();
         $user = Auth::user();
         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
 
-        if ($user && $user->hasRole('super_admin')) {
+        if ($user && $user->seesAllBranches()) {
             $hayCajasHoy = CashRegister::where('status', 'abierta')
                 ->where('opened_at', '>=', $hoyLima)
                 ->exists();
@@ -71,23 +78,122 @@ class CreateSale extends CreateRecord
         }
     }
 
+    /** /admin/sales/create?cambio=ID: venta nueva de un cambio de talla, con el saldo a favor. */
+    private function precargarCambio(): void
+    {
+        $returnId = (int) request()->query('cambio');
+        if (!$returnId) {
+            return;
+        }
+
+        $return = \App\Models\SaleReturn::with('sale')->find($returnId);
+        if (!$return || $return->available_credit <= 0) {
+            Notification::make()->title('Ese cambio ya no tiene saldo a favor')->warning()->send();
+
+            return;
+        }
+
+        $this->data['customer_id'] = $return->sale->customer_id;
+        $this->data['branch_id'] = $return->branch_id;
+        $this->data['warehouse_id'] = $return->warehouse_id;
+        $this->data['exchange_return_id'] = $return->id;
+        $this->data['items'] = [];
+        $this->data['payments'] = [['payment_method' => 'efectivo', 'amount' => 0]];
+    }
+
     // 2. ANTES DE GUARDAR: Validamos sucursal y asignamos número con candado
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // ─── 1. CALCULAR TOTAL DE LA VENTA (Misma fórmula que sales.total) ───
+        // ─── 1. PRECIOS CALCULADOS EN EL SERVIDOR (regla minorista/mayorista) ───
+        // Lo que manda el formulario no se cree: se vuelve a calcular todo (PLAN_MODA H1/H2).
         $totalVenta = 0.0;
         if (!empty($data['is_quick_sale'])) {
-            $totalVenta = round((float)($data['quick_sale_total'] ?? $this->data['quick_sale_total'] ?? 0), 2);
-        } else {
-            $items = $this->data['items'] ?? $data['items'] ?? [];
-            $totalVenta = round(collect($items)->sum(function ($item) {
-                if (isset($item['total']) && is_numeric($item['total'])) {
-                    return (float)$item['total'];
-                }
-                $cant = (float)($item['quantity'] ?? 1);
-                $precio = (float)($item['price'] ?? 0);
-                return $cant * $precio;
-            }), 2);
+            Notification::make()->title('La venta rápida fue retirada')->body('Registra la venta con sus prendas.')->danger()->send();
+            $this->halt();
+        }
+
+        $items = collect($this->data['items'] ?? [])
+            ->filter(fn ($i) => !empty($i['product_variant_id']))
+            ->all();
+
+        if (empty($items)) {
+            Notification::make()->title('Agrega al menos una prenda')->danger()->send();
+            $this->halt();
+        }
+
+        $warehouseId = \App\Support\SaleCart::warehouseFor($data['branch_id'] ?? null, $data['warehouse_id'] ?? null);
+        $data['warehouse_id'] = $warehouseId;
+
+        $requestId = $this->data['wholesale_request_id'] ?? null;
+        $pendingRequest = $requestId ? \App\Models\WholesalePriceRequest::find($requestId) : null;
+        if ($pendingRequest && $pendingRequest->status === 'pendiente') {
+            Notification::make()
+                ->title('Hay una aprobación pendiente')
+                ->body('Espera a que el administrador apruebe o rechace el precio mayorista, o pide que lo apruebe aquí con su PIN.')
+                ->warning()->persistent()->send();
+            $this->halt();
+        }
+
+        // Cambio de talla: saldo a favor de la devolución y modo de precio de la venta original
+        $exchangeReturn = !empty($this->data['exchange_return_id']) ? \App\Models\SaleReturn::with('sale')->find($this->data['exchange_return_id']) : null;
+        $credit = $exchangeReturn ? (float) $exchangeReturn->available_credit : 0.0;
+        if ($exchangeReturn && $credit <= 0) {
+            Notification::make()->title('El saldo a favor de este cambio ya se usó')->danger()->persistent()->send();
+            $this->halt();
+        }
+        if ($exchangeReturn && (int) $exchangeReturn->sale?->customer_id !== (int) ($data['customer_id'] ?? 0)) {
+            Notification::make()->title('El cambio debe hacerse al mismo cliente de la venta original')->danger()->send();
+            $this->halt();
+        }
+
+        $pricing = \App\Services\PricingService::apply(
+            $items,
+            isset($data['customer_id']) ? (int) $data['customer_id'] : null,
+            isset($data['branch_id']) ? (int) $data['branch_id'] : null,
+            $requestId ? (int) $requestId : null,
+            Auth::user(),
+            $exchangeReturn?->sale?->price_mode,
+        );
+
+        // Delivery solo si alguna prenda lo permite (decisión 4)
+        $hasService = collect($pricing['lines'])->contains(fn ($l) => ($l['price_type'] ?? null) === 'service');
+        if ($hasService && !\App\Support\SaleCart::allowsDelivery($items)) {
+            Notification::make()->title('Delivery no disponible')
+                ->body('Ninguna prenda de esta venta permite delivery.')->danger()->persistent()->send();
+            $this->halt();
+        }
+        if ($pricing['garments'] < 1) {
+            Notification::make()->title('La venta debe tener al menos una prenda')->danger()->send();
+            $this->halt();
+        }
+
+        // Sin stock negativo (decisión 5): se revisa antes y se vuelve a revisar al descontar con bloqueo
+        $faltantes = \App\Services\StockService::shortages($pricing['lines'], (int) $warehouseId);
+        if (!empty($faltantes)) {
+            Notification::make()
+                ->title('Stock insuficiente')
+                ->body(implode("\n", $faltantes))
+                ->danger()->persistent()->send();
+            $this->halt();
+        }
+
+        foreach ($pricing['lines'] as $key => $line) {
+            $pricing['lines'][$key]['price_set_by'] = ($line['price_reason'] ?? null) === 'manual' ? Auth::id() : null;
+        }
+
+        $this->data['items'] = $pricing['lines'];
+        $data['price_mode'] = $pricing['mode'];
+        $data['wholesale_request_id'] = $pricing['reason'] === 'authorized' ? (int) $requestId : null;
+        $data['exchange_return_id'] = $exchangeReturn?->id;
+        $totalVenta = $pricing['total'];
+
+        if ($exchangeReturn && $totalVenta + 0.001 < $credit) {
+            Notification::make()
+                ->title('El cambio debe ser por un monto igual o mayor')
+                ->body('El saldo a favor es S/ ' . number_format($credit, 2) . ' y la venta suma S/ ' . number_format($totalVenta, 2)
+                    . '. Agrega otra prenda, o pide al administrador una devolución de dinero.')
+                ->danger()->persistent()->send();
+            $this->halt();
         }
 
         // ─── 1.5. BLOQUEAR LÍNEAS EN PRECIO 0 PARA BOLETAS Y FACTURAS ───
@@ -97,14 +203,14 @@ class CreateSale extends CreateRecord
                 if ($totalVenta <= 0) {
                     Notification::make()
                         ->title('Línea con precio 0 no permitida')
-                        ->body('Las boletas y facturas no admiten líneas con precio 0. Escribe la placa u observación en la descripción del producto.')
+                        ->body('Las boletas y facturas no admiten líneas con precio 0. Revisa los precios del modelo.')
                         ->danger()
                         ->persistent()
                         ->send();
                     $this->halt();
                 }
             } else {
-                $itemsCheck = $this->data['items'] ?? $data['items'] ?? [];
+                $itemsCheck = $this->data['items'] ?? [];
                 foreach ($itemsCheck as $item) {
                     $precio = (float)($item['price'] ?? 0);
                     $cant = (float)($item['quantity'] ?? 1);
@@ -115,7 +221,7 @@ class CreateSale extends CreateRecord
                     if ($precio <= 0 || $totalLinea <= 0) {
                         Notification::make()
                             ->title('Línea con precio 0 no permitida')
-                            ->body('Las boletas y facturas no admiten líneas con precio 0. Escribe la placa u observación en la descripción del producto.')
+                            ->body('Las boletas y facturas no admiten líneas con precio 0. Revisa los precios del modelo.')
                             ->danger()
                             ->persistent()
                             ->send();
@@ -126,14 +232,51 @@ class CreateSale extends CreateRecord
         }
 
         // ─── 2. VALIDAR Y NORMALIZAR DESGLOSE DE PAGOS (Antes del candado) ───
-        $rawPayments = collect($this->data['payments'] ?? $data['payments'] ?? []);
+        // En un cambio, el saldo a favor paga primero; el resto se cobra con los medios elegidos
+        $rawPayments = collect($this->data['payments'] ?? $data['payments'] ?? [])
+            ->reject(fn ($p) => ($p['payment_method'] ?? null) === 'nota_credito');
+        $creditApplied = round(min($credit, $totalVenta), 2);
+        $totalVentaOriginal = $totalVenta;
+        $totalVenta = round($totalVenta - $creditApplied, 2);
 
         // En pagos mixtos, descartar filas con monto <= 0
         if ($rawPayments->count() > 1) {
             $rawPayments = $rawPayments->filter(fn($p) => (float)($p['amount'] ?? 0) > 0);
         }
 
-        if ($rawPayments->count() <= 1) {
+        // ─── Venta a crédito (mayoristas): lo pagado ahora es el adelanto; el resto queda como saldo ───
+        $esCredito = ($this->data['payment_condition'] ?? $data['payment_condition'] ?? 'contado') === 'credito';
+        $data['payment_condition'] = $esCredito ? 'credito' : 'contado';
+        $data['credit_balance'] = 0;
+        $data['due_date'] = null;
+
+        if ($esCredito) {
+            if (str_starts_with(trim((string) ($data['serie'] ?? '')), 'B')) {
+                Notification::make()->title('El crédito se registra con factura o nota de venta')
+                    ->body('Para vender a crédito elige Factura (cliente con RUC) o Nota de venta.')->danger()->persistent()->send();
+                $this->halt();
+            }
+
+            $rawPayments = $rawPayments->filter(fn ($p) => (float) ($p['amount'] ?? 0) > 0);
+            $adelanto = round($rawPayments->sum(fn ($p) => (float) $p['amount']), 2);
+            if ($adelanto >= $totalVenta) {
+                Notification::make()->title('El adelanto cubre toda la venta')->body('Regístrala al contado.')->warning()->send();
+                $this->halt();
+            }
+
+            $data['credit_balance'] = round($totalVenta - $adelanto, 2);
+            try {
+                $data['due_date'] = \App\Services\CreditService::assertCanSellOnCredit(
+                    \App\Models\Customer::find($data['customer_id'] ?? null), $data['credit_balance'], Auth::user(),
+                )->toDateString();
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                Notification::make()->title('No se puede vender a crédito')->body(collect($e->errors())->flatten()->first())->danger()->persistent()->send();
+                $this->halt();
+            }
+
+            $this->data['payments'] = $rawPayments->values()->toArray();
+            $data['payment_method'] = $rawPayments->isEmpty() ? 'credito' : 'múltiple';
+        } elseif ($rawPayments->count() <= 1) {
             // Pago único: asignar monto igual al total de la venta
             $primerPago = $rawPayments->first();
             $metodo = $primerPago['payment_method'] ?? 'efectivo';
@@ -163,6 +306,15 @@ class CreateSale extends CreateRecord
             $data['payment_method'] = 'múltiple';
         }
 
+        if ($creditApplied > 0) {
+            $this->data['payments'] = collect($this->data['payments'])
+                ->filter(fn ($p) => (float) ($p['amount'] ?? 0) > 0)
+                ->prepend(['payment_method' => 'nota_credito', 'amount' => $creditApplied])
+                ->values()->toArray();
+            $data['payment_method'] = count($this->data['payments']) > 1 ? 'múltiple' : 'nota_credito';
+        }
+        $totalVenta = $totalVentaOriginal;
+
         // Evitar duplicaciones por doble click (seguridad extra de 5 segundos para quien hace clic)
         $ultimaVentaReciente = \App\Models\Sale::where(function ($q) {
                 $q->where('user_id', Auth::id())
@@ -185,7 +337,7 @@ class CreateSale extends CreateRecord
         $user = Auth::user();
         $hoyLima = now()->setTimezone('America/Lima')->startOfDay();
 
-        if ($user && $user->hasRole('super_admin')) {
+        if ($user && $user->seesAllBranches()) {
             $cajaAbierta = CashRegister::getActiveForSuperAdmin($data['branch_id']);
 
             if (!$cajaAbierta) {
@@ -317,92 +469,80 @@ class CreateSale extends CreateRecord
         return $record;
     }
 
-    // 3. DESPUÉS DE GUARDAR
+    // 3. DESPUÉS DE GUARDAR (todavía dentro de la transacción)
     protected function afterCreate(): void
-    {
-        // ─── ENVOLTURA GLOBAL: ningún error aquí debe producir un 500 ───
-        try {
-            $this->procesarPostCreacion();
-        } catch (\Throwable $e) {
-            // El comprobante YA fue guardado. Solo notificamos el fallo interno.
-            Log::error('[CreateSale] Error en afterCreate: ' . $e->getMessage(), [
-                'sale_id' => $this->record?->id,
-                'file'    => $e->getFile(),
-                'line'    => $e->getLine(),
-            ]);
-
-            Notification::make()
-                ->title('Venta guardada ✓')
-                ->body('Se guardó correctamente, pero hubo un error interno: ' . $e->getMessage())
-                ->warning()
-                ->send();
-        }
-    }
-
-    // Lógica real separada para poder capturar cualquier Throwable
-    private function procesarPostCreacion(): void
     {
         $venta = $this->record;
 
-        // ── 1. VENTA RÁPIDA vs NORMAL (Calcular totalReal) ──
-        if ($venta->is_quick_sale) {
-            $totalReal = (float)$venta->total;
-        } else {
-            $totalReal = 0;
-            DB::transaction(function () use ($venta, &$totalReal) {
-                foreach ($venta->items as $item) {
-                    $totalReal += (float)($item->total ?? 0);
-
-                    $variante = \App\Models\ProductVariant::with('product')
-                        ->find($item->product_variant_id);
-
-                    if ($variante) {
-                        if ($variante->sku === 'REPE-GENERICO') continue;
-                        if ($variante->product && $variante->product->is_service) continue;
-                    }
-
-                    $warehouseId = $venta->warehouse_id ?? $venta->branch?->defaultWarehouse?->id ?? 1;
-
-                    $inventario = Inventory::where('product_variant_id', $item->product_variant_id)
-                        ->where('warehouse_id', $warehouseId)
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (!$inventario) {
-                        $inventario = Inventory::firstOrCreate(
-                            [
-                                'product_variant_id' => $item->product_variant_id,
-                                'warehouse_id' => $warehouseId,
-                            ],
-                            [
-                                'branch_id' => $venta->branch_id,
-                                'stock' => 0,
-                            ]
-                        );
-                        $inventario = Inventory::where('id', $inventario->id)->lockForUpdate()->first();
-                    }
-
-                    if ($inventario) {
-                        $inventario->decrement('stock', (int)($item->quantity ?? 1));
-                    }
+        // ── 1. STOCK: descuento con bloqueo y kardex. Si falta stock, se deshace toda la venta. ──
+        try {
+            $venta->load('items.productVariant.product');
+            foreach ($venta->items as $item) {
+                if (!$item->productVariant || $item->productVariant->product?->is_service) {
+                    continue;
                 }
-
-                $subtotal = round($totalReal / 1.18, 2);
-                $igv      = round($totalReal - $subtotal, 2);
-
-                $venta->update([
-                    'total'    => $totalReal,
-                    'subtotal' => $subtotal,
-                    'igv'      => $igv,
-                ]);
-            });
+                \App\Services\StockService::move(
+                    (int) $item->product_variant_id,
+                    (int) $venta->warehouse_id,
+                    -1 * (int) $item->quantity,
+                    'sale',
+                    $venta,
+                    "Venta {$venta->serie}-{$venta->correlative}",
+                    null,
+                    "{$venta->serie}-{$venta->correlative}",
+                );
+            }
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Notification::make()
+                ->title('Stock insuficiente: la venta no se guardó')
+                ->body(collect($e->errors())->flatten()->implode("\n"))
+                ->danger()->persistent()->send();
+            $this->halt(shouldRollbackDatabaseTransaction: true);
         }
 
-        // ── 2. SINCRONIZAR Y VERIFICAR PAGOS CONTRA sales.total ──
+        // ── 2. Totales desde el detalle guardado ──
+        $totalReal = round((float) $venta->items()->sum('total'), 2);
+        $subtotal = round($totalReal / 1.18, 2);
+        $venta->update(['total' => $totalReal, 'subtotal' => $subtotal, 'igv' => round($totalReal - $subtotal, 2)]);
+
+        // ── 3. La aprobación de precio mayorista queda usada por esta venta ──
+        \App\Services\WholesaleApprovalService::markUsed($venta->wholesale_request_id, $venta);
+
+        // ── 3b. Cambio de talla: el saldo a favor queda usado por esta venta (una sola vez) ──
+        if ($venta->exchange_return_id) {
+            try {
+                \App\Services\SaleExchangeService::linkNewSale((int) $venta->exchange_return_id, $venta);
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                Notification::make()->title(collect($e->errors())->flatten()->first())->danger()->persistent()->send();
+                $this->halt(shouldRollbackDatabaseTransaction: true);
+            }
+        }
+
+        // ── 4. Pagos y caja ──
+        $this->sincronizarPagosYCaja($venta);
+
+        // ── 5. SUNAT, recién cuando la venta quedó guardada (fuera de la transacción) ──
+        DB::afterCommit(function () use ($venta) {
+            try {
+                $this->enviarSunat($venta->fresh());
+            } catch (\Throwable $e) {
+                Log::error('[CreateSale] Error después de guardar: ' . $e->getMessage(), ['sale_id' => $venta->id]);
+                Notification::make()
+                    ->title('Venta guardada ✓')
+                    ->body('Se guardó correctamente, pero hubo un error interno: ' . $e->getMessage())
+                    ->warning()->send();
+            }
+        });
+    }
+
+    private function sincronizarPagosYCaja(\App\Models\Sale $venta): void
+    {
         $totalVentaFinal = (float) $venta->fresh()->total;
         $pagosRel = $venta->payments()->get();
 
-        if ($pagosRel->count() <= 1) {
+        if ($venta->payment_condition === 'credito') {
+            $pagosRel->filter(fn ($p) => (float) $p->amount <= 0)->each->delete();
+        } elseif ($pagosRel->count() <= 1) {
             $primerPago = $pagosRel->first();
             if ($primerPago) {
                 if ((float)$primerPago->amount !== $totalVentaFinal) {
@@ -438,39 +578,28 @@ class CreateSale extends CreateRecord
             }
         }
 
-        // ── 3. CAJA: Sumar exactamente el efectivo persistido en sale_payments ──
+        // Caja: sumar exactamente el efectivo guardado en sale_payments
         $montoEfectivo = (float) $venta->payments()
             ->where('payment_method', 'efectivo')
             ->sum('amount');
 
         if ($montoEfectivo > 0 && $this->cajaValidaId) {
-            $caja = CashRegister::find($this->cajaValidaId);
+            $caja = CashRegister::whereKey($this->cajaValidaId)->lockForUpdate()->first();
             if ($caja && $caja->status === 'abierta') {
                 $caja->increment('cash_sales', $montoEfectivo);
             }
         }
+    }
 
-        // ── 4. NOTIFICACIÓN VENTA RÁPIDA ──
-        if ($venta->is_quick_sale) {
-            $venta->update(['sunat_status' => 'pendiente']);
-
-            Notification::make()
-                ->title('⚡ Venta Rápida Registrada')
-                ->body('Recuerda auditar los repuestos para descontar el stock y declarar a SUNAT.')
-                ->warning()
-                ->send();
-
-            return;
-        }
-
-        // ── SUNAT ─────────────────────────────────────────────────────
+    private function enviarSunat(\App\Models\Sale $venta): void
+    {
         if (str_starts_with($venta->serie, 'NV')) {
             $venta->update(['sunat_status' => 'aceptado']);
             return;
         }
 
         try {
-            $service = new \App\Services\SunatService();
+            $service = app(\App\Services\SunatService::class);
             $res     = $service->enviarBoleta($venta);
 
             if (isset($res['success']) && $res['success'] === true) {

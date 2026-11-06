@@ -13,11 +13,13 @@ use Filament\Tables\Table;
 class SerieResource extends Resource
 {
     protected static ?string $model = Serie::class;
+    protected static ?string $cluster = \App\Filament\Clusters\CompanyAndSunat::class;
 
     protected static ?string $modelLabel = 'Serie y Correlativo';
     protected static ?string $pluralModelLabel = 'Series de Comprobantes';
+    protected static ?string $navigationLabel = 'Series de Comprobantes';
     protected static ?string $navigationIcon = 'heroicon-o-ticket';
-    protected static ?string $navigationGroup = '4. Configuración';
+    protected static ?string $navigationGroup = null;
     protected static ?int $navigationSort = 2;
 
     public static function form(Form $form): Form
@@ -86,7 +88,7 @@ class SerieResource extends Resource
                     ->preload()
                     ->required()
                     ->default(fn () => auth()->user()?->branch_id ?? 1)
-                    ->disabled(fn () => !auth()->user()?->hasRole('super_admin'))
+                    ->disabled(fn () => !auth()->user()?->seesAllBranches())
                     ->dehydrated(),
 
                 Forms\Components\Toggle::make('is_active')
@@ -137,7 +139,7 @@ class SerieResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\SelectFilter::make('document_type')
                     ->label('Tipo de Comprobante')
@@ -164,7 +166,7 @@ class SerieResource extends Resource
     {
         $query = parent::getEloquentQuery()->with('branch');
 
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId);
         }

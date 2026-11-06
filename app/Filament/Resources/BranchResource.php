@@ -22,9 +22,10 @@ class BranchResource extends Resource
     protected static ?string $model = Branch::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-building-storefront';
-    protected static ?string $navigationGroup = '3. Administración';
-    protected static ?int $navigationSort = 2;
+    protected static ?string $navigationGroup = 'Administración';
+    protected static ?int $navigationSort = 1;
     protected static ?string $modelLabel = 'Sucursal';
+    protected static ?string $pluralModelLabel = 'Sucursales';
 
     public static function form(\Filament\Forms\Form $form): \Filament\Forms\Form
     {
@@ -168,14 +169,14 @@ class BranchResource extends Resource
 
     public static function canCreate(): bool
     {
-        return auth()->user()?->hasRole('super_admin') ?? false;
+        return auth()->user()?->seesAllBranches() ?? false;
     }
 
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
 
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('id', $userBranchId);
         }

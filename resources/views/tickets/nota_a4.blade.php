@@ -97,7 +97,7 @@
                 @endif
             </td>
             <td style="width: 48%; vertical-align: middle;">
-                <div class="company-name">{{ $empresa->name ?? env('EMPRESA_NOMBRE', 'MANGUIPERU E.I.R.L.') }}</div>
+                <div class="company-name">{{ $empresa->name ?? env('EMPRESA_NOMBRE', '') }}</div>
                 <div class="company-info">
                     <span class="bold">SUCURSAL:</span> {{ $sale->branch->name ?? 'SEDE PRINCIPAL' }}<br>
                     <span class="bold">DIRECCIÓN:</span> {{ $sale->branch->address ?? $empresa->address_principal ?? env('EMPRESA_DIRECCION', 'Dirección no registrada') }}<br>

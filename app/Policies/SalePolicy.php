@@ -21,7 +21,7 @@ class SalePolicy
             return false;
         }
 
-        if (!$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$sale->branch_id) {
+        if (!$user->seesAllBranches() && (int)$user->branch_id !== (int)$sale->branch_id) {
             return false;
         }
 
@@ -39,7 +39,7 @@ class SalePolicy
             return false;
         }
 
-        if (!$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$sale->branch_id) {
+        if (!$user->seesAllBranches() && (int)$user->branch_id !== (int)$sale->branch_id) {
             return false;
         }
 

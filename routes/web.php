@@ -1,30 +1,13 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Models\Product;
-use App\Models\Category;
 use App\Http\Controllers\SalePrintController;
 use App\Http\Controllers\CashRegisterController;
-// 1. LA PÁGINA DE INICIO (Estática)
-Route::get('/', function () {
-    return view('welcome');
-});
 
-// Ruta pública para descargar el manual de usuario en PDF
-Route::get('/descargar-manual', function () {
-    $pdf = Barryvdh\DomPDF\Facade\Pdf::loadView('reports.manual');
-    return $pdf->download('Manual_Usuario_MaguiCRM.pdf');
-});
+// La raíz lleva al panel. La tienda web pública (/ropa) está desactivada por decisión del cliente.
+Route::get('/', fn () => redirect('/admin'));
 
-// 2. LA PÁGINA DE LA TIENDA (Dinámica)
-Route::get('/ropa', function () {
-    $products = Product::with('images')->where('is_web_visible', true)->latest()->get();
-    $categories = Category::all(); // Para ponerlas en el filtro izquierdo
-    
-    return view('shop', compact('products', 'categories'));
-});
-
-// 3. RUTAS DE IMPRESIÓN PROTEGIDAS (Controlador Moderno)
+// Rutas de impresión (solo usuarios autenticados)
 Route::middleware(['auth'])->group(function () {
     Route::get('/sales/{sale}/ticket', [SalePrintController::class, 'ticket'])->name('sales.ticket');
     Route::get('/sales/{sale}/a4', [SalePrintController::class, 'a4'])->name('sales.a4');
@@ -35,10 +18,11 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/caja/cierre-pdf/{id}', [CashRegisterController::class, 'imprimirCierre'])->name('caja.imprimir_cierre');
     Route::get('/despatches/{despatch}/pdf', [\App\Http\Controllers\DespatchPrintController::class, 'pdf'])->name('despatches.pdf');
     Route::get('/quotations/{quotation}/pdf', [\App\Http\Controllers\QuotationPrintController::class, 'pdf'])->name('quotations.pdf');
-});
 
-// 4. IMPORTADOR DE PRODUCTOS (sin Livewire, directo)
-Route::middleware(['auth'])->group(function () {
-    Route::get('/importar-productos', [\App\Http\Controllers\ProductImportController::class, 'page'])->name('import.products.page');
-    Route::post('/importar-productos', [\App\Http\Controllers\ProductImportController::class, 'import'])->name('import.products.import');
+    // Cambios y devoluciones (nota de crédito parcial o comprobante interno)
+    Route::get('/cambios/{return}/ticket', [SalePrintController::class, 'ticketDevolucion'])->name('sale-returns.ticket');
+
+    // Etiquetas con código de barras
+    Route::get('/etiquetas/compra/{purchase}', [\App\Http\Controllers\LabelController::class, 'purchase'])->name('labels.purchase');
+    Route::get('/etiquetas', [\App\Http\Controllers\LabelController::class, 'custom'])->name('labels.custom');
 });

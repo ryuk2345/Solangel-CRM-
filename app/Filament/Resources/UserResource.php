@@ -14,16 +14,17 @@ use Illuminate\Database\Eloquent\Builder;
 class UserResource extends Resource
 {
     protected static ?string $model = User::class;
+    protected static ?string $cluster = \App\Filament\Clusters\UsersAndRoles::class;
 
     protected static ?string $modelLabel = 'Usuario';
     protected static ?string $pluralModelLabel = 'Usuarios del Sistema';
     protected static ?string $navigationIcon = 'heroicon-o-users';
-    protected static ?string $navigationGroup = '4. Configuración';
-    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = null;
+    protected static ?int $navigationSort = 1;
 
     public static function form(Form $form): Form
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $form
             ->schema([
@@ -59,18 +60,33 @@ class UserResource extends Resource
                     ->searchable(),
 
                 Forms\Components\Select::make('roles')
-                    ->label('¿Qué permisos tendrá? (Rol)')
-                    ->relationship('roles', 'name')
+                    ->label('Rol')
+                    ->helperText('Administrador, vendedor, almacenero o contador.')
+                    // super_admin es el rol técnico del proveedor: solo otro super_admin puede asignarlo
+                    ->relationship('roles', 'name', fn (Builder $query) => auth()->user()?->hasRole('super_admin')
+                        ? $query
+                        : $query->where('name', '!=', 'super_admin'))
                     ->multiple()
                     ->preload()
                     ->searchable()
                     ->disabled(!$isSuperAdmin),
+
+                Forms\Components\TextInput::make('approval_pin')
+                    ->label('PIN de aprobación (4 a 6 dígitos)')
+                    ->helperText('Solo para administradores: con este PIN aprueban el precio mayorista de 1 prenda. Déjalo vacío para no cambiarlo.')
+                    ->password()
+                    ->revealable()
+                    ->formatStateUsing(fn () => null)
+                    ->regex('/^\\d{4,6}$/')
+                    ->validationMessages(['regex' => 'El PIN debe tener de 4 a 6 números.'])
+                    ->dehydrated(fn ($state) => filled($state))
+                    ->visible($isSuperAdmin),
             ]);
     }
 
     public static function table(Table $table): Table
     {
-        $isSuperAdmin = auth()->user()?->hasRole('super_admin') ?? false;
+        $isSuperAdmin = auth()->user()?->seesAllBranches() ?? false;
 
         return $table
             ->columns([
@@ -122,8 +138,13 @@ class UserResource extends Resource
     {
         $query = parent::getEloquentQuery()->with(['branch', 'roles']);
 
-        // Los usuarios no super_admin solo ven los usuarios de su propia tienda
+        // El usuario técnico super_admin no se muestra al cliente
         if (!auth()->user()?->hasRole('super_admin')) {
+            $query->whereDoesntHave('roles', fn ($r) => $r->where('name', 'super_admin'));
+        }
+
+        // Solo el administrador ve los usuarios de todas las tiendas
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId);
         }

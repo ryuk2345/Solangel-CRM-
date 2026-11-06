@@ -12,7 +12,7 @@ class CreateWarehouse extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         // Si el usuario no es super_admin, forzar su sucursal
-        if (!auth()->user()->hasRole('super_admin')) {
+        if (!auth()->user()->seesAllBranches()) {
             $data['branch_id'] = auth()->user()->branch_id;
         }
 

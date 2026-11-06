@@ -39,7 +39,7 @@ class ProductPolicy
      */
     public function update(User $user, Product $product): bool
     {
-        if ($user->hasRole('super_admin')) {
+        if ($user->seesAllBranches()) {
             return true;
         }
 
@@ -62,7 +62,7 @@ class ProductPolicy
      */
     public function delete(User $user, Product $product): bool
     {
-        if ($user->hasRole('super_admin')) {
+        if ($user->seesAllBranches()) {
             return true;
         }
 

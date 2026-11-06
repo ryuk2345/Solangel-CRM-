@@ -24,9 +24,16 @@ class SaleAnulacionService
     public static function anularVenta(Sale $sale, array $data, User $user): array
     {
         // 1. Control estricto de sucursal para cajeros (vendedor)
-        if (!$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$sale->branch_id) {
+        if (!$user->seesAllBranches() && (int)$user->branch_id !== (int)$sale->branch_id) {
             return [
                 'error' => 'No tiene permiso para anular ventas de otra sucursal.'
+            ];
+        }
+
+        // 1b. Si ya hubo cambios o devoluciones parciales, la nota de crédito total duplicaría el crédito
+        if ($sale->returns()->exists()) {
+            return [
+                'error' => 'Esta venta tiene cambios o devoluciones registradas. Para devolver el resto de prendas usa "Cambio / devolución".',
             ];
         }
 
@@ -134,7 +141,7 @@ class SaleAnulacionService
     public static function regularizarNotaCredito(Sale $sale, array $data, User $user): array
     {
         // 1. Control estricto de sucursal para cajeros (vendedor)
-        if (!$user->hasRole('super_admin') && (int)$user->branch_id !== (int)$sale->branch_id) {
+        if (!$user->seesAllBranches() && (int)$user->branch_id !== (int)$sale->branch_id) {
             return [
                 'error' => 'No tiene permiso para regularizar ventas de otra sucursal.'
             ];
@@ -235,28 +242,17 @@ class SaleAnulacionService
                 continue;
             }
 
-            $inventario = Inventory::where('product_variant_id', $item->product_variant_id)
-                ->where('warehouse_id', $warehouseId)
-                ->lockForUpdate()
-                ->first();
-
-            if (!$inventario) {
-                $inventario = Inventory::firstOrCreate(
-                    [
-                        'product_variant_id' => $item->product_variant_id,
-                        'warehouse_id' => $warehouseId,
-                    ],
-                    [
-                        'branch_id' => $sale->branch_id,
-                        'stock' => 0,
-                    ]
-                );
-                $inventario = Inventory::where('id', $inventario->id)->lockForUpdate()->first();
-            }
-
-            if ($inventario) {
-                $inventario->increment('stock', $item->quantity);
-            }
+            // Devuelve el stock por el kardex (movimiento 'sale_void' enlazado a la venta)
+            StockService::move(
+                (int) $item->product_variant_id,
+                (int) $warehouseId,
+                (int) $item->quantity,
+                'sale_void',
+                $sale,
+                "Anulación {$sale->serie}-{$sale->correlative}",
+                null,
+                "{$sale->serie}-{$sale->correlative}",
+            );
         }
     }
 }

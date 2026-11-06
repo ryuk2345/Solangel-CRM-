@@ -17,13 +17,15 @@ use App\Models\Sale;
 use App\Models\Serie;
 use App\Models\User;
 use App\Models\Warehouse;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 class ZeroPriceLineBlockingTest extends TestCase
 {
-    use DatabaseTransactions;
+    use RefreshDatabase;
+
+    protected bool $seed = true;
 
     protected User $superAdmin;
 
@@ -127,16 +129,20 @@ class ZeroPriceLineBlockingTest extends TestCase
             ]);
         }
 
-        $genericProduct = Product::firstOrCreate(
-            ['name' => 'Repuesto Varios / Genérico'],
-            ['is_service' => true, 'sale_price' => 0, 'is_web_visible' => false]
-        );
-        $genericVariant = ProductVariant::firstOrCreate(
-            ['product_id' => $genericProduct->id],
-            ['sku' => 'REPE-GENERICO', 'color_name' => 'Único', 'size' => 'Único']
-        );
+        // Una prenda con precio 0 en el catálogo y otra normal, habilitadas en la tienda y con stock
+        $zeroProduct = Product::firstOrCreate(['name' => 'Prenda sin precio (prueba)'], ['sale_price' => 0, 'is_web_visible' => false]);
+        $zeroProduct->branches()->syncWithoutDetaching([$branch->id]);
+        $genericVariant = ProductVariant::firstOrCreate(['product_id' => $zeroProduct->id], ['sku' => 'PRUEBA-CERO', 'color_name' => 'Único', 'size' => 'Único']);
+        $normalProduct = Product::firstOrCreate(['name' => 'Prenda normal (prueba)'], ['sale_price' => 100, 'is_web_visible' => false]);
+        $normalProduct->branches()->syncWithoutDetaching([$branch->id]);
+        $normalVariant = ProductVariant::firstOrCreate(['product_id' => $normalProduct->id], ['sku' => 'PRUEBA-100', 'color_name' => 'Único', 'size' => 'Único']);
+        foreach ([$genericVariant, $normalVariant] as $v) {
+            if (\App\Services\StockService::available($v->id, $warehouse->id) < 10) {
+                \App\Services\StockService::move($v->id, $warehouse->id, 10, 'initial');
+            }
+        }
 
-        return compact('branch', 'warehouse', 'caja', 'serieF', 'serieNotaVenta', 'customer', 'genericVariant');
+        return compact('branch', 'warehouse', 'caja', 'serieF', 'serieNotaVenta', 'customer', 'genericVariant', 'normalVariant');
     }
 
     /**
@@ -168,8 +174,8 @@ class ZeroPriceLineBlockingTest extends TestCase
 
             $itemsConCero = [
                 'item1' => [
-                    'product_variant_id' => $env['genericVariant']->id,
-                    'product_name'       => 'MANGUERA + ABRAZADERAS + CHUCK',
+                    'product_variant_id' => $env['normalVariant']->id,
+                    'product_name'       => 'Prenda normal',
                     'quantity'           => 1,
                     'price'              => 100.00,
                     'total'              => 100.00,
@@ -177,7 +183,7 @@ class ZeroPriceLineBlockingTest extends TestCase
                 ],
                 'item2' => [
                     'product_variant_id' => $env['genericVariant']->id,
-                    'product_name'       => 'PLACA: A0R806',
+                    'product_name'       => 'Prenda sin precio',
                     'quantity'           => 1,
                     'price'              => 0.00,
                     'total'              => 0.00,
@@ -262,7 +268,7 @@ class ZeroPriceLineBlockingTest extends TestCase
             QuotationItem::create([
                 'quotation_id'       => $quotation->id,
                 'product_variant_id' => $env['genericVariant']->id,
-                'product_name'       => 'PLACA: A0R806',
+                'product_name'       => 'Prenda sin precio',
                 'quantity'           => 1,
                 'price'              => 0.00,
                 'subtotal'           => 0.00,
@@ -284,80 +290,5 @@ class ZeroPriceLineBlockingTest extends TestCase
         }
     }
 
-    /**
-     * En Sucursal Principal (id 1) y Tienda 2 (id 2):
-     * Auditar una Venta Rápida con una línea en precio 0 se bloquea en boleta/factura.
-     */
-    public function test_auditar_venta_rapida_con_linea_cero_se_bloquea_en_ambas_tiendas(): void
-    {
-        $this->actingAs($this->superAdmin);
-
-        $tiendas = [
-            ['id' => 1, 'code' => '0000', 'serie_f' => 'F001', 'serie_nv' => 'NV01'],
-            ['id' => 2, 'code' => '0002', 'serie_f' => 'F021', 'serie_nv' => 'NV02'],
-        ];
-
-        foreach ($tiendas as $t) {
-            $env = $this->prepararEntornoTienda($t['id'], $t['code'], $t['serie_f'], $t['serie_nv']);
-
-            $quickSale = Sale::create([
-                'customer_id'            => $env['customer']->id,
-                'user_id'                => $this->superAdmin->id,
-                'seller_id'              => $this->superAdmin->id,
-                'branch_id'              => $env['branch']->id,
-                'warehouse_id'           => $env['warehouse']->id,
-                'document_type'          => '01',
-                'serie'                  => $env['serieF']->serie,
-                'correlative'            => 700 + $t['id'],
-                'issue_date'             => now(),
-                'subtotal'               => 84.75,
-                'igv'                    => 15.25,
-                'total'                  => 100.00,
-                'payment_condition'      => 'contado',
-                'payment_method'         => 'efectivo',
-                'sunat_status'           => 'pendiente',
-                'is_quick_sale'          => true,
-                'is_audited'             => false,
-                'quick_sale_description' => 'Venta rápida de prueba',
-            ]);
-
-            Livewire::test(SaleResource\Pages\ListSales::class)
-                ->mountTableAction('auditar_venta', $quickSale)
-                ->set('mountedTableActionsData.0.audited_items', [
-                    'row1' => [
-                        'product_variant_id' => $env['genericVariant']->id,
-                        'quantity'           => 1,
-                        'price'              => 100.00,
-                    ],
-                    'row2' => [
-                        'product_variant_id' => $env['genericVariant']->id,
-                        'quantity'           => 1,
-                        'price'              => 0.00,
-                    ],
-                ])
-                ->callMountedTableAction()
-                ->assertHasNoTableActionErrors()
-                ->assertNotified('Línea con precio 0 no permitida');
-
-            $this->assertFalse($quickSale->fresh()->is_audited, "Tienda {$t['id']}: La venta rápida no debe marcarse como auditada si tiene línea en 0.");
-            $this->assertEquals(0, $quickSale->items()->count(), "Tienda {$t['id']}: No deben crearse ítems auditados con línea en 0.");
-
-            // 2. Si la suma de líneas auditadas no coincide con el total cobrado, no deja guardar y explica la diferencia
-            Livewire::test(SaleResource\Pages\ListSales::class)
-                ->mountTableAction('auditar_venta', $quickSale)
-                ->set('mountedTableActionsData.0.audited_items', [
-                    'row1' => [
-                        'product_variant_id' => $env['genericVariant']->id,
-                        'quantity'           => 1,
-                        'price'              => 80.00,
-                    ],
-                ])
-                ->callMountedTableAction()
-                ->assertHasNoTableActionErrors()
-                ->assertNotified('El total auditado no coincide con el total cobrado');
-
-            $this->assertFalse($quickSale->fresh()->is_audited, "Tienda {$t['id']}: No debe auditar si la suma no coincide con el total cobrado.");
-        }
-    }
+    // El test de 'auditar venta rápida' se retiró junto con la venta rápida (decisión 3).
 }
-

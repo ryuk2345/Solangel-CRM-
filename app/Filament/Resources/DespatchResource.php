@@ -26,8 +26,8 @@ class DespatchResource extends Resource
     protected static ?string $model = Despatch::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-truck';
-    protected static ?string $navigationGroup = '3. Administración';
-    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = 'Administración';
+    protected static ?int $navigationSort = 2;
     protected static ?string $modelLabel = 'Guía de Remisión';
     protected static ?string $pluralModelLabel = 'Guías de Remisión';
 
@@ -84,7 +84,7 @@ class DespatchResource extends Resource
                             ->relationship('branch', 'name')
                             ->required()
                             ->default(fn () => auth()->user()?->branch_id ?? 1)
-                            ->disabled(fn () => !auth()->user()?->hasRole('super_admin'))
+                            ->disabled(fn () => !auth()->user()?->seesAllBranches())
                             ->dehydrated()
                             ->live()
                             ->rules(fn (Forms\Get $get): array => [
@@ -294,7 +294,7 @@ class DespatchResource extends Resource
                             ->relationship('items')
                             ->schema([
                                 Forms\Components\Select::make('product_variant_id')
-                                    ->label('Buscar Repuesto')
+                                    ->label('Buscar prenda')
                                     ->options(function (Forms\Get $get) {
                                         $branchId = $get('../../branch_id') ?? auth()->user()?->branch_id ?? 1;
                                         return ProductVariant::with('product')
@@ -314,7 +314,7 @@ class DespatchResource extends Resource
                                         }
                                     }),
                                 Forms\Components\TextInput::make('product_name')
-                                    ->label('Descripción del Repuesto')
+                                    ->label('Descripción de la prenda')
                                     ->required(),
                                 Forms\Components\TextInput::make('quantity')
                                     ->label('Cantidad')
@@ -382,7 +382,7 @@ class DespatchResource extends Resource
                     ->badge()
                     ->color('info')
                     ->sortable()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('branch_id')
@@ -390,7 +390,7 @@ class DespatchResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Filters\SelectFilter::make('sunat_status')
                     ->label('Estado SUNAT')
@@ -503,7 +503,7 @@ class DespatchResource extends Resource
                         RepeatableEntry::make('items')
                             ->label('')
                             ->schema([
-                                TextEntry::make('product_name')->label('Repuesto'),
+                                TextEntry::make('product_name')->label('Prenda'),
                                 TextEntry::make('quantity')->label('Cantidad'),
                                 TextEntry::make('unit_code')->label('Unidad'),
                             ])->columns(3)
@@ -515,7 +515,7 @@ class DespatchResource extends Resource
     {
         $query = parent::getEloquentQuery()->with(['branch', 'customer', 'sale']);
 
-        if (!auth()->user()?->hasRole('super_admin')) {
+        if (!auth()->user()?->seesAllBranches()) {
             $userBranchId = auth()->user()?->branch_id ?? 1;
             $query->where('branch_id', $userBranchId);
         }

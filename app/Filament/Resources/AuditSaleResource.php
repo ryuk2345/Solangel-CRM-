@@ -18,8 +18,8 @@ class AuditSaleResource extends Resource
     protected static ?string $model = \App\Models\AuditSale::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-check';
-    protected static ?string $navigationGroup = '3. Administración';
-    protected static ?int $navigationSort = 1;
+    protected static ?string $navigationGroup = 'Administración';
+    protected static ?int $navigationSort = 4;
     protected static ?string $modelLabel = 'Auditoría de Venta';
 
     public static function form(Form $form): Form
@@ -99,7 +99,7 @@ class AuditSaleResource extends Resource
                     ->color('info')
                     ->sortable()
                     ->searchable()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 Tables\Columns\TextColumn::make('warehouse.name')
                     ->label('Almacén')
@@ -141,12 +141,12 @@ class AuditSaleResource extends Resource
                     ->label('Sucursal')
                     ->searchable()
                     ->preload()
-                    ->visible(fn () => auth()->user()?->hasRole('super_admin') ?? false),
+                    ->visible(fn () => auth()->user()?->seesAllBranches() ?? false),
 
                 // 4. Filtro por Almacén
                 Tables\Filters\SelectFilter::make('warehouse_id')
                     ->relationship('warehouse', 'name', function (Builder $query) {
-                        if (!auth()->user()?->hasRole('super_admin')) {
+                        if (!auth()->user()?->seesAllBranches()) {
                             $query->where('branch_id', auth()->user()?->branch_id ?? 1);
                         }
                         return $query->where('is_active', true);
@@ -317,7 +317,7 @@ class AuditSaleResource extends Resource
                         )
                         ->modalSubmitActionLabel('Confirmar y Procesar')
                         ->visible(fn (Sale $record) =>
-                            auth()->user()?->hasRole('super_admin') &&
+                            auth()->user()?->seesAllBranches() &&
                             !str_starts_with($record->serie, 'NV') &&
                             in_array($record->sunat_status, ['rechazado', 'pendiente']) &&
                             (!$record->is_quick_sale || $record->is_audited)
@@ -359,7 +359,7 @@ class AuditSaleResource extends Resource
                         ->modalHeading('Reemisión y Reintento Masivo a SUNAT')
                         ->modalDescription('Se procesarán los comprobantes seleccionados que estén pendientes o rechazados. Los pendientes se reintentarán primero; si SUNAT los rechaza, se reemitirán con número nuevo. Los rechazados se reemitirán directamente con número nuevo y fecha de hoy. Stock y caja no se modificarán.')
                         ->modalSubmitActionLabel('Iniciar Procesamiento Masivo')
-                        ->visible(fn () => auth()->user()?->hasRole('super_admin'))
+                        ->visible(fn () => auth()->user()?->seesAllBranches())
                         ->action(function (Collection $records) {
                             $filtrados = $records->filter(fn (Sale $r) =>
                                 !str_starts_with($r->serie, 'NV') &&
@@ -505,7 +505,7 @@ class AuditSaleResource extends Resource
         $query = parent::getEloquentQuery();
         $user = auth()->user();
 
-        if ($user && !$user->hasRole('super_admin')) {
+        if ($user && !$user->seesAllBranches()) {
             $query->where('branch_id', $user->branch_id ?? 1);
         }
 

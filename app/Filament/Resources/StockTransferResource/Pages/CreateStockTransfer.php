@@ -23,7 +23,7 @@ class CreateStockTransfer extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $user = auth()->user();
-        if (!$user->hasRole('super_admin')) {
+        if (!$user->seesAllBranches()) {
             $data['origin_branch_id'] = $user->branch_id ?? 1;
         }
 
@@ -121,23 +121,6 @@ class CreateStockTransfer extends CreateRecord
                     ]);
                 }
 
-                $inv->decrement('stock', $qtySent);
-
-                // Si es traspaso interno, sumar de inmediato al almacén de destino en la misma transacción
-                if ($isInterno) {
-                    $destInv = Inventory::firstOrCreate(
-                        [
-                            'product_variant_id' => $variantId,
-                            'warehouse_id' => $destWarehouseId,
-                        ],
-                        [
-                            'branch_id' => $destBranchId,
-                            'stock' => 0,
-                        ]
-                    );
-                    $destInv = Inventory::where('id', $destInv->id)->lockForUpdate()->first();
-                    $destInv->increment('stock', $qtySent);
-                }
             }
 
             // 2. Crear cabecera del traspaso
@@ -153,6 +136,16 @@ class CreateStockTransfer extends CreateRecord
                     'quantity_difference' => 0,
                     'notes' => $item['notes'] ?? null,
                 ]);
+            }
+
+            // 4. Mover el stock por el kardex (salida del origen; entrada inmediata si es interno)
+            $guideDoc = $transfer->despatch?->document_number ?? $transfer->number;
+            foreach ($itemsData as $item) {
+                $qtySent = (int) $item['quantity_sent'];
+                \App\Services\StockService::move((int) $item['product_variant_id'], (int) $originWarehouseId, -$qtySent, 'transfer_out', $transfer, "Traspaso {$transfer->number}", null, null, $guideDoc);
+                if ($isInterno) {
+                    \App\Services\StockService::move((int) $item['product_variant_id'], (int) $destWarehouseId, $qtySent, 'transfer_in', $transfer, "Traspaso {$transfer->number}", null, null, $guideDoc);
+                }
             }
 
             return $transfer;
