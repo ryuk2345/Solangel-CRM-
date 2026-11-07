@@ -60,6 +60,8 @@
 !/storage/app/sunat/certs/.gitkeep
 /storage/app/sunat/xmls/
 /storage/app/sunat/cdrs/
+/storage/app/private/sunat/certs/
+/storage/app/private/sunat/certs/*
 
 ##############################################
 #  Base de datos SQLite local

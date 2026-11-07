@@ -17,6 +17,7 @@ use App\Services\SunatService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\Group;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -571,6 +572,7 @@ class SaleReemissionTest extends TestCase
      * Una venta pendiente con línea en 0 de servicio/genérico pasa su texto a la línea anterior,
      * guarda todos los datos de la línea en 0 en el historial, quita la línea en 0 y SUNAT la acepta.
      */
+    #[Group('sunat-beta')]
     public function test_venta_pendiente_con_linea_en_cero_pasa_texto_y_sunat_la_acepta_en_ambas_tiendas(): void
     {
         $this->requiereSunatBeta();
@@ -690,6 +692,7 @@ class SaleReemissionTest extends TestCase
      * y el código de anexo de su tienda (0000 en Principal, 0002 en Tienda 2),
      * verifica impresión de QR/Hash y SUNAT la acepta.
      */
+    #[Group('sunat-beta')]
     public function test_venta_rechazada_se_reemite_con_serie_y_codigo_anexo_de_su_tienda_en_ambas_tiendas(): void
     {
         $this->requiereSunatBeta();
