@@ -16,11 +16,14 @@ class InitialSetupSeeder extends Seeder
     {
         // 1. Configuración de la empresa (SUNAT siempre en sandbox al instalar)
         if (!DB::table('company_settings')->exists()) {
+            $sunatSandbox = true;
+
             DB::table('company_settings')->insert([
                 'ruc'           => env('EMPRESA_RUC') ?: '20000000001',
                 'name'          => env('EMPRESA_NOMBRE') ?: 'EMPRESA DE PRUEBA S.A.C.',
                 'address_principal' => env('EMPRESA_DIRECCION') ?: null,
-                'sunat_sandbox' => true,
+                'sunat_sandbox' => $sunatSandbox,
+                'cert_path'     => $sunatSandbox ? (env('SUNAT_CERT_PATH') ?: null) : null,
                 'created_at'    => now(),
                 'updated_at'    => now(),
             ]);
